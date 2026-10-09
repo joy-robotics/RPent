@@ -17,13 +17,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from robots.robotwin.env_client import RoboTwinEnvClient
 from robots.robotwin.robot_spec import MODEL_SPEC, ROBOTWIN_CAMERA_NAMES
 from robots.robotwin.vla_client import LingBotVLAClient
+
+if TYPE_CHECKING:
+    from robots.robotwin.joybrain_client import JoyBrainVLAClient
 
 
 def _qmult(left: np.ndarray, right: np.ndarray) -> np.ndarray:
@@ -47,7 +50,7 @@ class RoboTwinPrimitives:
         self,
         *,
         env: RoboTwinEnvClient,
-        model: LingBotVLAClient,
+        model: LingBotVLAClient | JoyBrainVLAClient,
         seed: int,
         check_cancelled: Callable[[], None],
         seed_mode: str = "exact",
@@ -58,6 +61,7 @@ class RoboTwinPrimitives:
         self.model = model
         self.seed = int(seed)
         self._check_cancelled = check_cancelled
+        self._joybrain_execution_uncertain = False
         self.policy_actions = 0
         self.native_actions = 0
         self._recording = False
@@ -91,6 +95,7 @@ class RoboTwinPrimitives:
         """Reset the RoboTwin episode and return the native info plus success."""
         del instruction, feasibility_precheck
         _, info = self.env.reset()
+        self._joybrain_execution_uncertain = False
         return {**info, "success": True}
 
     @staticmethod
@@ -207,6 +212,8 @@ class RoboTwinPrimitives:
             raise ValueError(
                 f"RoboTwin LingBot requires use_length={MODEL_SPEC.use_length}"
             )
+        if getattr(self.model, "backend", "lingbot") == "joybrain":
+            return self._joybrain_act(chunks=int(chunks), prompt=prompt)
         executed = 0
         requested = int(chunks) * MODEL_SPEC.use_length
         native_prompt = None
@@ -250,6 +257,93 @@ class RoboTwinPrimitives:
             "agent_prompt_ignored": prompt is not None,
             "ignored_agent_prompt": prompt,
             "episode_status": status,
+        }
+
+    def _joybrain_act(self, *, chunks: int, prompt: str | None):
+        """Fill each legacy tool window from fresh native JoyBrain chunks."""
+        if self._joybrain_execution_uncertain:
+            raise RuntimeError(
+                "Previous JoyBrain execution outcome is unknown; start a new episode"
+            )
+        requested = chunks * MODEL_SPEC.use_length
+        executed = 0
+        inference_calls = 0
+        native_prompt = None
+        for _ in range(chunks):
+            window_steps = 0
+            while window_steps < MODEL_SPEC.use_length:
+                self._check_cancelled()
+                status = self.env.last_info["episode_status"]
+                step_limit = status.get("step_lim")
+                remaining = MODEL_SPEC.use_length - window_steps
+                if step_limit is not None:
+                    remaining = min(
+                        remaining, int(step_limit) - int(status["take_action_cnt"])
+                    )
+                if (
+                    self.env.terminated
+                    or self.env.truncated
+                    or status.get("eval_success") is True
+                    or remaining <= 0
+                ):
+                    break
+                observation = self._build_lingbot_observation()
+                native_prompt = observation["task_language"]
+                actions = np.asarray(self.model.infer(observation))
+                if (
+                    actions.shape != (self.model.chunk_size, 14)
+                    or not np.isfinite(actions).all()
+                ):
+                    raise ValueError(
+                        "JoyBrain must return a finite [chunk_size,14] qpos array"
+                    )
+                from robots.robotwin.recording import enabled
+
+                if enabled(self.env):
+                    self.env.trace("proposal", native_prompt, actions)
+                inference_calls += 1
+                self._check_cancelled()
+                count = min(remaining, len(actions))
+                try:
+                    payload, _, _, _, info = self.env.chunk_step(
+                        actions[:count],
+                        action_type="qpos",
+                        return_all_frames=self._recording
+                        and self.env.execution_capabilities.get("chunk_step_all_frames")
+                        is True,
+                    )
+                except Exception:
+                    self._joybrain_execution_uncertain = True
+                    raise
+                actual = info.get("executed_actions")
+                if type(actual) is not int or not 1 <= actual <= count:
+                    self._joybrain_execution_uncertain = True
+                    raise RuntimeError("Invalid JoyBrain native execution count")
+                executed += actual
+                window_steps += actual
+                self.policy_actions += actual
+                self.native_actions += actual
+                if self._recording and isinstance(payload, dict):
+                    for frame in payload.get("frames", []):
+                        self.record_frame(frame)
+                self._check_cancelled()
+                if actual < count:
+                    break
+            if window_steps < MODEL_SPEC.use_length:
+                break
+        status = self.env.last_info["episode_status"]
+        return {
+            **self._completion(requested=requested, executed=executed, status=status),
+            "success": True,
+            "prompt": native_prompt,
+            "agent_prompt_ignored": prompt is not None,
+            "ignored_agent_prompt": prompt,
+            "episode_status": status,
+            "vla_backend": "joybrain",
+            "action_layout": "qpos14",
+            "vla_inferences": inference_calls,
+            "policy_chunk_size": self.model.chunk_size,
+            "tool_window": MODEL_SPEC.use_length,
         }
 
     def move_to(

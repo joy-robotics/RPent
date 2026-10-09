@@ -69,6 +69,10 @@ test = [
 rlinf = [
     "rlinf @ git+https://github.com/RLinf/RLinf.git@release/v0.4",
 ]
+joybrain = [
+    "msgpack>=1,<2",
+    "websockets>=15,<17",
+]
 sam3 = [
     "sam3 @ git+https://github.com/RLinf/sam3.git@main",
     "einops>=0.8.0",

@@ -23,6 +23,8 @@ docs/build/
 build/
 .claude/settings.json
 .venv/
+.env
+.vscode/
 
 # Standalone calibration environment.
 .venv-calibration/

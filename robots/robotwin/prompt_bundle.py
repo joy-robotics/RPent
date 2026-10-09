@@ -29,15 +29,29 @@ def system_prompt(
 ) -> PromptNode:
     """Return the RoboTwin system prompt for the selected run mode."""
     if (variables or {}).get("mode", "eval") == "explore":
-        return explore_parts.system_prompt()
-    return evaluate_parts.system_prompt(variables)
+        sections = explore_parts.system_prompt()
+    else:
+        sections = evaluate_parts.system_prompt(variables)
+    if (variables or {}).get("vla_backend") == "joybrain":
+        sections = {
+            title: text.replace("LingBot-VLA", "Joy-Brain VLA")
+            for title, text in sections.items()
+        }
+    if (variables or {}).get("strategy") == "atomic-preferred":
+        sections["ATOMIC PREFERENCE"] = evaluate_parts.ATOMIC_PREFERRED
+    return sections
 
 
 def user_prompt(
     variables: Mapping[str, object] | None = None,
 ) -> PromptNode:
+    cell = user_parts.CELL
+    if (variables or {}).get("vla_backend") == "joybrain":
+        cell = cell.replace(
+            "RLinf/LingBot-VLA-RoboTwin-EEF-ckpt1500", "{{vla_checkpoint}} (Joy-Brain)"
+        )
     prompt = {
-        "CELL": user_parts.CELL,
+        "CELL": cell,
         "BEGIN": user_parts.BEGIN,
     }
     if (variables or {}).get("mode", "eval") == "explore":

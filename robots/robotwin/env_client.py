@@ -39,6 +39,7 @@ class RoboTwinEnvClient(BaseEnvClient):
     def __init__(self, client: RpcClient, *, expected_meta: dict[str, Any]):
         self.terminated = False
         self.truncated = False
+        self.recording_failed = False
         self._expected_seed = int(expected_meta["seed"])
         super().__init__(client, expected_meta=expected_meta)
         self.server_meta = dict(expected_meta)
@@ -46,6 +47,19 @@ class RoboTwinEnvClient(BaseEnvClient):
         self.execution_capabilities = (
             dict(execution) if isinstance(execution, dict) else {}
         )
+
+    def trace(self, method: str, *args) -> dict:
+        """Call the recorder; a failed trace prevents further recorded mutations."""
+        if (
+            self.recording_failed
+            or self.execution_capabilities.get("native_action_recording") is not True
+        ):
+            raise RuntimeError("Native recording is unavailable or has failed")
+        try:
+            return self._client.call(f"trace.{method}", args=args, timeout_s=120)
+        except BaseException:
+            self.recording_failed = True
+            raise
 
     @staticmethod
     def _require_result_tuple(result: Any, size: int, method: str) -> tuple:

@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -125,6 +126,12 @@ class RoboTwinToolkit(Toolkit):
         self._primitives.start_recording()
         self._action_frame_cursor = self._primitives.recorded_frame_count()
         self._register_robotwin_tools()
+        from robots.robotwin.recording import enabled, install_file_guards
+
+        if enabled(self._primitives.env):
+            install_file_guards(
+                self, Path(state_output_dir or get_output_dir()), Path(memory.root)
+            )
         initial = self.get_env_state(
             command={"action": "reset"},
             result=reset_result,
@@ -164,7 +171,17 @@ class RoboTwinToolkit(Toolkit):
             "set_gripper",
             "release",
         ):
-            self.add_tool(name, self._SPECS[name], partial(self._step, name))
+            spec = self._SPECS[name]
+            if (
+                name == "lingbot_act"
+                and getattr(getattr(self._primitives, "model", None), "backend", None)
+                == "joybrain"
+            ):
+                spec = deepcopy(spec)
+                spec["description"] = spec["description"].replace(
+                    "LingBot-VLA eef16", "Joy-Brain VLA qpos14"
+                )
+            self.add_tool(name, spec, partial(self._step, name))
         finish_handler = (
             self._guarded_finish if self._mode == "exploration" else self._finish
         )
@@ -283,9 +300,31 @@ class RoboTwinToolkit(Toolkit):
 
     def close(self) -> None:
         """Flush the per-step frame buffer into ``episode.mp4`` (LIBERO parity)."""
-        frames = self._primitives.stop_recording()
-        if frames:
-            self._state.save("episode.mp4", frames, step=None, fps=20)
+        try:
+            from robots.robotwin.recording import enabled, write_json
+
+            env = getattr(self._primitives, "env", None)
+            if enabled(env):
+                write_json(
+                    Path(get_output_dir()) / "native_status.json",
+                    {
+                        "episode_status": self._primitives.env.last_info[
+                            "episode_status"
+                        ],
+                        "terminated": self._primitives.env.terminated,
+                        "truncated": self._primitives.env.truncated,
+                        "recording_failed": self._primitives.env.recording_failed,
+                        "execution_uncertain": self._primitives._joybrain_execution_uncertain,
+                    },
+                )
+            frames = self._primitives.stop_recording()
+            if frames:
+                self._state.save("episode.mp4", frames, step=None, fps=20)
+        finally:
+            model = getattr(self._primitives, "model", None)
+            close = getattr(model, "close", None)
+            if getattr(model, "close_on_toolkit_close", False) and callable(close):
+                close()
 
     def solved(self) -> bool:
         """Return the native RoboTwin task success flag."""
@@ -295,7 +334,20 @@ class RoboTwinToolkit(Toolkit):
         self.raise_if_cancelled()
         if name == "render":
             return {"success": True}
-        return getattr(self._primitives, name)(**kwargs)
+        if getattr(self._primitives, "_joybrain_execution_uncertain", False):
+            raise RuntimeError(
+                "Previous JoyBrain execution outcome is unknown; no more mutations allowed"
+            )
+        from robots.robotwin.recording import enabled, record_tool
+
+        env = self._primitives.env
+        try:
+            with record_tool(env, name, kwargs):
+                return getattr(self._primitives, name)(**kwargs)
+        except BaseException:
+            if enabled(env):
+                env.recording_failed = True
+            raise
 
     def write_recipe(self, recipe_tag: str) -> str:
         """Export state-advancing RoboTwin primitives with no error and no

@@ -93,7 +93,8 @@ from robots.robotwin.robot_spec import RoboTwinActionType  # noqa: E402
 class RoboTwinEnvFacade(BaseEnvFacade):
     """Expose common and typed RoboTwin environment RPC contracts."""
 
-    def __init__(self, env: Any, *, metadata: dict[str, Any]):
+    def __init__(self, env: Any, *, metadata: dict[str, Any], recorder: Any = None):
+        self._recorder = recorder
         self._env = env
         self._metadata = dict(metadata)
         super().__init__()
@@ -144,6 +145,13 @@ class RoboTwinEnvFacade(BaseEnvFacade):
     def _register_rpc(self) -> None:
         super()._register_rpc()
         self._rpc["env.plan_arm_path"] = self.plan_arm_path
+        if self._recorder is not None:
+            self._rpc.update(
+                {
+                    f"trace.{name}": getattr(self._recorder, name)
+                    for name in ("begin", "end", "proposal", "summary")
+                }
+            )
 
     def get_env_meta(self) -> dict[str, Any]:
         """Return immutable identity for endpoint compatibility checks."""
@@ -153,6 +161,10 @@ class RoboTwinEnvFacade(BaseEnvFacade):
         _teardown_env(self._env)
 
     def reset(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        if self._recorder is not None and (
+            self._recorder.action_index or self._recorder.context
+        ):
+            raise RuntimeError("A recorded episode cannot be reset in place")
         seed = int(self._metadata["seed"])
         observation, info = self._env.reset(env_idx=[0], env_seeds=[seed])
         episode_status = info["episode_status"]
@@ -362,8 +374,17 @@ def main() -> None:
     )
     parser.add_argument("--assets-path", required=True)
     parser.add_argument("--parent-watch", action="store_true")
+    parser.add_argument("--trace-dir", type=Path)
+    parser.add_argument("--trace-config", type=Path)
     args = parser.parse_args()
 
+    if bool(args.trace_dir) != bool(args.trace_config):
+        parser.error("--trace-dir and --trace-config must be supplied together")
+    recorder = None
+    if args.trace_dir:
+        from robots.robotwin.recording import NativeRecorder, load_metadata
+
+        recorder = NativeRecorder(args.trace_dir, load_metadata(args.trace_config))
     env = make_env(
         args.task_name,
         args.task_config,
@@ -371,15 +392,21 @@ def main() -> None:
         args.assets_path,
         args.max_episode_steps,
     )
+    if recorder is not None:
+        if len(env.venv.envs) != 1:
+            raise ValueError("Native recorder owns exactly one environment")
+        recorder.attach(env.venv.envs[0].task)
     from robots.robotwin.robot_spec import env_runtime_contract
 
     facade = RoboTwinEnvFacade(
         env,
+        recorder=recorder,
         metadata=env_runtime_contract(
             task_name=args.task_name,
             task_config=args.task_config,
             seed=args.seed,
             max_episode_steps=args.max_episode_steps,
+            record_actions=recorder is not None,
         ),
     )
     facade.serve(

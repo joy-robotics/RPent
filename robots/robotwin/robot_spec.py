@@ -136,6 +136,7 @@ def env_runtime_contract(
     task_config: str,
     seed: int,
     max_episode_steps: int = 10000,
+    record_actions: bool = False,
 ) -> dict[str, object]:
     """Return the identity required from a RoboTwin EnvServer."""
     return {
@@ -151,6 +152,7 @@ def env_runtime_contract(
             "chunk_step": True,
             "action_layouts": ["qpos14", MODEL_SPEC.action_layout],
             "chunk_step_all_frames": True,
+            **({"native_action_recording": True} if record_actions else {}),
             "step_limit": int(max_episode_steps),
         },
         "extensions": {
@@ -183,6 +185,8 @@ def vla_runtime_contract() -> dict[str, object]:
 
 
 def get_robot_spec() -> RobotSpec:
+    from robots.robotwin.recording import finalize_run
+
     return RobotSpec(
         name="robotwin",
         prompts=PromptBundle(system=system_prompt, user=user_prompt),
@@ -191,6 +195,7 @@ def get_robot_spec() -> RobotSpec:
         init_runtime=_init_runtime,
         dashboard=ROBOTWIN_DASHBOARD_SPEC,
         supports_exploration=True,
+        finalize_run=finalize_run,
     )
 
 
@@ -221,9 +226,39 @@ def get_toolkit(
     )
 
 
+class _ModelPathAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        namespace._vla_model_path_explicit = True
+
+
+class _BackendAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        if not getattr(namespace, "_vla_model_path_explicit", False):
+            variable = (
+                "JOYBRAIN_MODEL_PATH" if values == "joybrain" else "LINGBOT_MODEL_PATH"
+            )
+            namespace.vla_model_path = os.environ.get(variable)
+
+
 def _add_cli_args(parser: argparse.ArgumentParser, use_dashboard: bool) -> None:
     required = not use_dashboard
     parser.add_argument("--task-name", required=required)
+    parser.add_argument(
+        "--record-actions",
+        action="store_true",
+        help="Record all executed native actions and aligned observations.",
+    )
+    parser.add_argument(
+        "--recording-config",
+        type=Path,
+        default=None,
+        help="Optional public episode metadata JSON; no credentials.",
+    )
+    parser.add_argument(
+        "--strategy", choices=["upstream", "atomic-preferred"], default="upstream"
+    )
     parser.add_argument(
         "--seed",
         type=int,
@@ -276,9 +311,32 @@ def _add_cli_args(parser: argparse.ArgumentParser, use_dashboard: bool) -> None:
     parser.add_argument("--env-endpoint", default=None)
     parser.add_argument("--vla-endpoint", default=None)
     parser.add_argument(
+        "--vla-backend",
+        choices=["lingbot", "joybrain"],
+        default="lingbot",
+        action=_BackendAction,
+    )
+    parser.add_argument(
+        "--vla-python",
+        default=None,
+        help="Separate policy interpreter; defaults to the current Python.",
+    )
+    parser.add_argument(
+        "--joybrain-repo",
+        default=os.environ.get("JOYBRAIN_REPO_ROOT"),
+        help="Joy-Brain-vla checkout; defaults to the sibling checkout.",
+    )
+    parser.add_argument(
+        "--joybrain-timeout",
+        type=float,
+        default=120.0,
+        help="JoyBrain metadata/inference receive timeout in seconds.",
+    )
+    parser.add_argument(
         "--vla-model-path",
         default=os.environ.get("LINGBOT_MODEL_PATH"),
-        help=("LingBot checkpoint. Defaults to LINGBOT_MODEL_PATH when set."),
+        action=_ModelPathAction,
+        help="Selected backend checkpoint. Defaults to LINGBOT_MODEL_PATH or JOYBRAIN_MODEL_PATH.",
     )
     parser.add_argument(
         "--lingbot-robot-config",
@@ -297,7 +355,7 @@ def _add_cli_args(parser: argparse.ArgumentParser, use_dashboard: bool) -> None:
     parser.add_argument(
         "--vla-cuda-device",
         default=None,
-        help="CUDA_VISIBLE_DEVICES value for the LingBot VLA server.",
+        help="CUDA_VISIBLE_DEVICES value for the selected VLA server.",
     )
 
 
@@ -305,6 +363,18 @@ def _parse_config(args: argparse.Namespace) -> RunConfig:
     if not args.task_name:
         raise ValueError("--task-name is required")
     env_cuda_device, vla_cuda_device = _resolve_cuda_devices(args)
+    joybrain = getattr(args, "vla_backend", "lingbot") == "joybrain"
+    model_path = _configured_model_path(args)
+    if getattr(args, "record_actions", False) and (
+        not joybrain or getattr(args, "explore", False) or args.env_endpoint
+    ):
+        raise ValueError(
+            "Action recording requires Joy-Brain evaluation with an owned environment"
+        )
+    if getattr(args, "recording_config", None) and not getattr(
+        args, "record_actions", False
+    ):
+        raise ValueError("--recording-config requires --record-actions")
     task_config = getattr(args, "task_config", "demo_randomized")
     recipe_tag = f"robotwin_{args.task_name}_{task_config}_s{args.seed}"
     output_dir = args.output_dir
@@ -328,6 +398,9 @@ def _parse_config(args: argparse.Namespace) -> RunConfig:
         else f"{args.task_name}_s0"
     )
     prompt_vars = {
+        "strategy": getattr(args, "strategy", "upstream"),
+        "vla_backend": "joybrain" if joybrain else "lingbot",
+        "vla_checkpoint": model_path or "external JoyBrain endpoint",
         "task_name": args.task_name,
         "seed": args.seed,
         "task_config": task_config,
@@ -355,14 +428,18 @@ def _parse_config(args: argparse.Namespace) -> RunConfig:
         prompt_vars=prompt_vars,
         task_desc={
             "env": "robotwin",
+            "record_actions": getattr(args, "record_actions", False),
+            "strategy": getattr(args, "strategy", "upstream"),
             "task_name": args.task_name,
             "requested_seed": args.seed,
             "initial_native_seed": initial_seed,
             "seed_mode": "exact",
             "task_config": task_config,
             "instruction": None,
-            "policy_name": MODEL_SPEC.policy_name,
-            "action_layout": MODEL_SPEC.action_layout,
+            "policy_name": "joybrain_robotwin" if joybrain else MODEL_SPEC.policy_name,
+            "vla_backend": "joybrain" if joybrain else "lingbot",
+            "vla_model_path": model_path,
+            "action_layout": "qpos14" if joybrain else MODEL_SPEC.action_layout,
             "env_cuda_device": env_cuda_device,
             "vla_cuda_device": vla_cuda_device,
         },
@@ -388,7 +465,7 @@ def _wait_for_tcp(
         except OSError as error:
             last_error = error
             time.sleep(0.5)
-    raise TimeoutError(f"LingBot server not ready: {last_error}")
+    raise TimeoutError(f"VLA server not ready: {last_error}")
 
 
 def _parse_vla_endpoint(endpoint: str) -> tuple[str, int]:
@@ -420,18 +497,32 @@ def _resolve_env_runtime_path(args: argparse.Namespace) -> Path | None:
     return assets_path
 
 
+def _configured_model_path(args: argparse.Namespace) -> str | None:
+    environment_key = (
+        "JOYBRAIN_MODEL_PATH"
+        if getattr(args, "vla_backend", "lingbot") == "joybrain"
+        else "LINGBOT_MODEL_PATH"
+    )
+    return getattr(args, "vla_model_path", None) or os.environ.get(environment_key)
+
+
 def _resolve_vla_runtime_path(args: argparse.Namespace) -> Path | None:
     model_path: Path | None = None
     if args.vla_endpoint is None:
-        configured_model = getattr(args, "vla_model_path", None)
+        configured_model = _configured_model_path(args)
         if not configured_model:
             raise ValueError(
                 "--vla-model-path is required when launching the local VLA "
-                "server; set LINGBOT_MODEL_PATH or pass the option explicitly"
+                "server; set the selected backend model path or pass the option explicitly"
             )
         model_path = Path(configured_model).expanduser().resolve()
-        _validate_local_model_files(model_path)
-        _resolve_lingbot_robot_config(args, model_path)
+        if getattr(args, "vla_backend", "lingbot") == "joybrain":
+            from robots.robotwin.joybrain_server import validate_checkpoint
+
+            validate_checkpoint(model_path)
+        else:
+            _validate_local_model_files(model_path)
+            _resolve_lingbot_robot_config(args, model_path)
     return model_path
 
 
@@ -499,6 +590,12 @@ def _init_runtime(
     if unknown:
         raise ValueError(f"unknown RoboTwin runtime components: {sorted(unknown)}")
 
+    joybrain_client_class = None
+    if "vla" in selected and getattr(args, "vla_backend", "lingbot") == "joybrain":
+        from robots.robotwin.joybrain_client import JoyBrainVLAClient
+
+        joybrain_client_class = JoyBrainVLAClient
+
     owned_daemons: dict[str, ProcessDaemon] = {}
     env_pending: tuple[ProcessDaemon | None, Any] | None = None
     vla_pending: tuple[ProcessDaemon | None, tuple[str, int]] | None = None
@@ -548,7 +645,22 @@ def _init_runtime(
                 vla_daemon,
                 timeout_s=900.0 if vla_daemon is not None else 300.0,
             )
-            vla_kwargs = _build_vla_runtime_kwargs(endpoint)
+            if joybrain_client_class is not None:
+                host, port = endpoint
+                uri = args.vla_endpoint or f"ws://{host}:{port}"
+                if "://" not in uri:
+                    uri = f"ws://{uri}"
+                vla_kwargs = {
+                    "model": joybrain_client_class(
+                        uri,
+                        timeout=args.joybrain_timeout,
+                        expected_checkpoint=_configured_model_path(args),
+                        close_on_toolkit_close=components is None
+                        and not getattr(args, "explore", False),
+                    )
+                }
+            else:
+                vla_kwargs = _build_vla_runtime_kwargs(endpoint)
         except Exception as exc:
             stop_owned_daemons(owned_daemons, dashboard_events)
             dashboard_events.emit(RuntimeStatusEvent("vla", "failed", error=exc))
@@ -576,6 +688,32 @@ def _spawn_env_server(
                 "--robotwin-assets-path is required to launch the env server"
             )
         host, env_port = "127.0.0.1", pick_free_port()
+        recording_args = []
+        if getattr(args, "record_actions", False):
+            from robots.robotwin.recording import load_metadata, write_json
+
+            supplied = getattr(args, "recording_config", None)
+            metadata = load_metadata(Path(supplied)) if supplied else {}
+            metadata.update(
+                platform="robotwin",
+                task=args.task_name,
+                seed=initial_seed,
+                task_config=args.task_config,
+                checkpoint=_configured_model_path(args)
+                or metadata.get("policy_metadata", {}).get("ckpt_path"),
+                planner=getattr(args, "planner", None),
+                model=getattr(args, "model", None),
+                strategy=getattr(args, "strategy", "upstream"),
+                max_episode_steps=args.max_episode_steps,
+            )
+            config_path = output_dir / "recording_config.json"
+            write_json(config_path, metadata)
+            recording_args = [
+                "--trace-dir",
+                str(output_dir / "trace"),
+                "--trace-config",
+                str(config_path),
+            ]
         env_daemon = ProcessDaemon(
             "robotwin_env_server",
             [
@@ -598,6 +736,7 @@ def _spawn_env_server(
                 "--port",
                 str(env_port),
                 "--parent-watch",
+                *recording_args,
             ],
             env_overrides={
                 "ROBOTWIN_ASSETS_PATH": assets_path,
@@ -612,6 +751,8 @@ def _spawn_env_server(
         from rpent.utils.rpc.http_rpc import HttpRpcClient
 
         env_rpc = HttpRpcClient(f"http://{host}:{env_port}")
+        for credential in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+            env_daemon.subprocess_env.pop(credential, None)
         env_daemon.start()
         return env_daemon, env_rpc
     else:
@@ -629,6 +770,9 @@ def _spawn_vla_server(
     if args.vla_endpoint is not None:
         return None, _parse_vla_endpoint(args.vla_endpoint)
 
+    if getattr(args, "vla_backend", "lingbot") == "joybrain":
+        return _spawn_joybrain_server(args, output_dir)
+
     _, vla_cuda_device = _resolve_cuda_devices(args)
     model_path = _resolve_vla_runtime_path(args)
     assert model_path is not None
@@ -639,7 +783,7 @@ def _spawn_vla_server(
     daemon = ProcessDaemon(
         "lingbot_vla_server",
         [
-            sys.executable,
+            getattr(args, "vla_python", None) or sys.executable,
             str(get_repo_root() / "robots" / "robotwin" / "vla_server.py"),
             "--model-path",
             str(model_path),
@@ -683,6 +827,7 @@ def _build_env_runtime_kwargs(
                 task_config=args.task_config,
                 seed=initial_seed,
                 max_episode_steps=int(args.max_episode_steps),
+                record_actions=getattr(args, "record_actions", False),
             ),
         ),
         "seed": initial_seed,
@@ -697,3 +842,43 @@ def _build_vla_runtime_kwargs(endpoint: tuple[str, int]) -> dict[str, Any]:
     model = LingBotVLAClient(host=host, port=port)
     model.validate_contract(vla_runtime_contract())
     return {"model": model}
+
+
+def _spawn_joybrain_server(args, output_dir):
+    from rpent.utils.daemon import ProcessDaemon, pick_free_port
+
+    model_path = _resolve_vla_runtime_path(args)
+    source = (
+        Path(
+            getattr(args, "joybrain_repo", None)
+            or get_repo_root().parent / "Joy-Brain-vla"
+        )
+        .expanduser()
+        .resolve()
+    )
+    if not (source / "src/lerobot/serving/server_policy.py").is_file():
+        raise ValueError(f"--joybrain-repo is not a Joy-Brain-vla checkout: {source}")
+    _, device = _resolve_cuda_devices(args)
+    port = pick_free_port()
+    daemon = ProcessDaemon(
+        "joybrain_vla_server",
+        [
+            getattr(args, "vla_python", None) or sys.executable,
+            str(get_repo_root() / "robots/robotwin/joybrain_server.py"),
+            "--model-path",
+            str(model_path),
+            "--joybrain-repo",
+            str(source),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--parent-watch",
+        ],
+        env_overrides={"CUDA_VISIBLE_DEVICES": device} if device is not None else {},
+        log_path=str(output_dir / "joybrain_vla_server.log"),
+    )
+    for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "RPENT_BASELINE_API_KEY"):
+        daemon.subprocess_env.pop(name, None)
+    daemon.start()
+    return daemon, ("127.0.0.1", port)

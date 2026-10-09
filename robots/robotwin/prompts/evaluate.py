@@ -153,3 +153,14 @@ def system_prompt(
         "BUDGET AND SUCCESS": BUDGET_AND_SUCCESS,
         "MODE": USER_MODE,
     }
+
+
+ATOMIC_PREFERRED = """Prefer geometric tools for observation-grounded approach, transport,
+placement, wrist orientation and release. Use world-map tools to obtain targets;
+do not invent coordinates or assume grasp success. For uncertain grasp/contact,
+use lingbot_act, normally chunks=1 and use_length=50, then inspect the result.
+Once an object is visibly held, prefer atomic transport and placement over
+repeatedly delegating the whole task. This is a preference, not a phase lock or
+tool quota. VLA receives the full native instruction and ignores local prompt;
+it can progress beyond grasping. Keep both tool families available for recovery,
+protect completed subgoals, and use native success rather than tool success."""
