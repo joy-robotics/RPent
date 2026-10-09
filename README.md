@@ -203,6 +203,12 @@ For a complete list of CLI options, see the [Command-Line Reference](https://rpe
 
 For more detailed documentation, see the [RPent documentation](https://rpent.readthedocs.io/en/latest/).
 
+## Optional Joy-Brain backend (RoboTwin)
+
+RoboTwin can use `--vla-backend joybrain` while keeping the original LingBot default.
+The client, policy launcher and qpos adaptation are implemented in this repository;
+see [the Joy-Brain integration guide](robots/robotwin/JOYBRAIN.md).
+
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the

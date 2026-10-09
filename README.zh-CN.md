@@ -204,6 +204,12 @@ rpent --robot libero --dashboard --dashboard-language zh-cn \
 
 更详细的文档请参见 [RPent 中文文档](https://rpent.readthedocs.io/zh-cn/latest/)。
 
+## 可选 Joy-Brain 后端（RoboTwin）
+
+可通过 `--vla-backend joybrain` 选择 Joy-Brain，默认仍为原 LingBot。
+客户端、模型启动和 qpos 适配已直接集成到本仓库，不依赖外部适配器注册；
+参见 [接入说明](robots/robotwin/JOYBRAIN.md)。
+
 ## 参与贡献
 
 欢迎社区贡献。开发环境、必需检查、测试规范和集成检查清单请参见
