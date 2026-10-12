@@ -57,3 +57,59 @@ CPU 回归：`python -m pytest -q tests/unit_tests/robots/robotwin`。
 
 并行评测入口为 `python -m robots.robotwin.evaluate`，数据导出入口为
 `python -m robots.robotwin.dataset`；用法见 [PARALLEL_ROLLOUT.md](PARALLEL_ROLLOUT.md)。
+
+正式评测入口支持两种布局，`--workers-per-gpu` 始终表示每张**环境卡**上的
+worker 数。GPU 列表可以使用实际索引或完整 UUID，必须全部位于当前获分配的
+可见设备范围内，不会自动替换缺失设备。
+
+| 布局 | GPU 参数 | 模型数 / worker 槽位数 |
+| --- | --- | --- |
+| 八卡同卡，各一个 worker | `--gpu-layout colocated --gpu-ids 0,1,2,3,4,5,6,7 --workers-per-gpu 1` | 8 / 8 |
+| 四组分卡，共 20 worker | `--gpu-layout split --gpu-ids 0,1,2,3,4,5,6,7 --workers-per-gpu 5` | 4 / 20 |
+
+分卡模式按列表顺序组成 `(模型卡, 环境卡)`，上例即 `0→1、2→3、4→5、6→7`。
+每组只有模型卡加载 VLA，环境卡上的五个 worker 共用该组 endpoint。
+模型内部推理仍为串行，没有自动 batch。
+
+先用明确的小任务预算生成计划，例如：
+
+```bash
+python -m robots.robotwin.evaluate \
+  --gpu-layout split --gpu-ids 0,1,2,3,4,5,6,7 \
+  --workers-per-gpu 5 --max-active-planners 20 \
+  --joybrain-repo "$JOYBRAIN_REPO_ROOT" \
+  --vla-model-path "$JOYBRAIN_MODEL_PATH" --vla-python "$JOYBRAIN_PYTHON" \
+  --robotwin-assets-path "$ROBOTWIN_ASSETS_PATH" \
+  --model 'openai:your-model-id' --tasks click_bell --episodes-per-task 1 \
+  --gpu-start-min-free-mib 30052 --gpu-runtime-min-free-mib 2048 \
+  --max-turns 4 --planner-timeout-s 600 --max-episode-steps 256 \
+  --dry-run --output-dir /path/to/new/plan
+```
+
+这些环境变量必须先设置为真实路径，模型 ID 和 API 凭据需匹配获准使用的服务商。
+示例只规划一个 episode，不会因为有 20 个槽位就自动启动 20 条任务。
+30052/2048 MiB 是经过特定配置校准的示例值，不是所有权重、任务或 GPU 的通用保证。
+确认实际显存、任务预算和仿真图像/上下文的发送授权后，才移除 `--dry-run`。
+
+同卡模式的默认启动门槛为 `30000 + 8000 × workers` MiB；分卡模式在每张所选卡上
+默认要求 `max(30000, 8000 × workers)` MiB。运行期默认保留 12000 MiB，可显式配置，
+但必须满足 `启动门槛 >= 运行门槛 >= 1024 MiB`。两种检查覆盖所有模型卡和环境卡。
+
+每张环境卡一次只初始化一个 worker，等其初始 `states.json` 观测落盘后再放行下一个；
+已就绪的 worker 可以继续执行，不同卡也可以同时初始化。初始化等待默认 1800 秒，
+可用 `--worker-startup-timeout-s` 设置；超时记录为该次尝试失败，不自动重放。
+控制器为所有模型先启动进程，再等待就绪，并通过不执行推理的保活请求防止慢启动时
+模型服务空闲退出。
+
+默认在输出目录的 `runtime-cache` 下按模型 GPU、worker 槽位和组件隔离编译/渲染缓存，
+可用 `--runtime-cache-dir` 设置根目录。同一槽位在先前进程组退出后才可复用。
+不会写入既有模型环境或修改系统驱动。
+
+**这里复用的是 VLA 服务和 worker 槽位，不是跨 episode 常驻的 Python worker/仿真环境。**
+每个 episode 仍创建新的原生 CLI worker。跨 episode 常驻复用及长期吞吐需要另行验证，
+不能把 dry-run 或工程动作链通过当作完整 Agent 成功。
+
+`plan.json` 记录模型/环境分组、模型服务数和总 worker 容量；每条调度结果区分
+`gpu_uuid`（环境卡）与 `model_gpu_uuid`。恢复任务默认继承原布局，老结果按同卡布局
+处理；显式更改布局、设备数量或 worker 数会保留各阶段来源，并标为混合并发配置。
+显存门槛需重新显式提供，不能把旧布局的余量静默套用到新配置。

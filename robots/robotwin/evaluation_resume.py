@@ -121,6 +121,7 @@ def inherited_defaults(state: ResumeState) -> dict[str, Any]:
     }
     defaults["base_url"] = state.plan.get("base_url", defaults.get("base_url"))
     defaults["gpu_ids"] = configuration.get("gpu_ids", "0")
+    defaults["gpu_layout"] = configuration.get("gpu_layout", "colocated")
     defaults["_vla_model_path_explicit"] = defaults.get("vla_model_path") is not None
     return defaults
 

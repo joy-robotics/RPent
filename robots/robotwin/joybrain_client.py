@@ -197,6 +197,28 @@ class JoyBrainVLAClient:
                 self.close()
                 raise
 
+    def ping(self) -> None:
+        """Keep a shared policy service alive without running inference."""
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("JoyBrain connection closed")
+            request_id = uuid4().hex
+            try:
+                self._connection.send(pack({"type": "ping", "request_id": request_id}))
+                response = unpack(self._connection.recv(timeout=self.timeout))
+                if (
+                    not isinstance(response, dict)
+                    or response.get("request_id") != request_id
+                    or response.get("protocol_version") != "2.1"
+                    or response.get("type") != "ping"
+                    or response.get("status") != "ok"
+                    or response.get("ok") is not True
+                ):
+                    raise ValueError("Invalid JoyBrain keepalive response")
+            except Exception:
+                self.close()
+                raise
+
     def close(self) -> None:
         if not self._closed:
             self._closed = True

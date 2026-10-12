@@ -138,3 +138,12 @@ def test_multiple_resume_phases_keep_original_provenance(tmp_path):
     state = load_parent(second)
     assert len(state.pending) == 2
     assert all(row["phase"]["workers_per_gpu"] == 4 for row in state.completed)
+
+
+def test_layout_defaults_are_preserved_on_resume_and_old_runs_are_colocated(tmp_path):
+    root = tmp_path / "parent"
+    plan, _ = parent_run(root)
+    assert inherited_defaults(load_parent(root))["gpu_layout"] == "colocated"
+    plan["configuration"]["gpu_layout"] = "split"
+    (root / "plan.json").write_text(json.dumps(plan))
+    assert inherited_defaults(load_parent(root))["gpu_layout"] == "split"

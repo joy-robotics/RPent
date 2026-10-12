@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Callable, Literal
 
 from robots.robotwin.prompt_bundle import system_prompt, user_prompt
 from rpent.dashboard.events import DashboardEventSink, RuntimeStatusEvent
@@ -311,6 +311,11 @@ def _add_cli_args(parser: argparse.ArgumentParser, use_dashboard: bool) -> None:
     parser.add_argument("--env-endpoint", default=None)
     parser.add_argument("--vla-endpoint", default=None)
     parser.add_argument(
+        "--runtime-cache-dir",
+        type=Path,
+        help="Private Env/VLA compiler and renderer cache root for this worker.",
+    )
+    parser.add_argument(
         "--vla-backend",
         choices=["lingbot", "joybrain"],
         default="lingbot",
@@ -451,10 +456,13 @@ def _wait_for_tcp(
     port: int,
     daemon: ProcessDaemon | None,
     timeout_s: float = 900.0,
+    check_status: Callable[[], None] | None = None,
 ) -> None:
     deadline = time.time() + timeout_s
     last_error = None
     while time.time() < deadline:
+        if check_status is not None:
+            check_status()
         if daemon is not None and daemon.poll() is not None:
             raise RuntimeError(
                 f"{daemon.name} exited before listening; inspect its log"
@@ -675,6 +683,7 @@ def _spawn_env_server(
     args: argparse.Namespace,
     output_dir: Path,
 ) -> tuple["ProcessDaemon | None", Any]:
+    from robots.robotwin.runtime_cache import cache_environment
     from rpent.utils.daemon import ProcessDaemon, pick_free_port
 
     env_cuda_device, _ = _resolve_cuda_devices(args)
@@ -739,6 +748,7 @@ def _spawn_env_server(
                 *recording_args,
             ],
             env_overrides={
+                **cache_environment(getattr(args, "runtime_cache_dir", None), "env"),
                 "ROBOTWIN_ASSETS_PATH": assets_path,
                 **(
                     {"CUDA_VISIBLE_DEVICES": env_cuda_device}
@@ -845,6 +855,7 @@ def _build_vla_runtime_kwargs(endpoint: tuple[str, int]) -> dict[str, Any]:
 
 
 def _spawn_joybrain_server(args, output_dir):
+    from robots.robotwin.runtime_cache import cache_environment
     from rpent.utils.daemon import ProcessDaemon, pick_free_port
 
     model_path = _resolve_vla_runtime_path(args)
@@ -875,7 +886,10 @@ def _spawn_joybrain_server(args, output_dir):
             str(port),
             "--parent-watch",
         ],
-        env_overrides={"CUDA_VISIBLE_DEVICES": device} if device is not None else {},
+        env_overrides={
+            **cache_environment(getattr(args, "runtime_cache_dir", None), "vla"),
+            **({"CUDA_VISIBLE_DEVICES": device} if device is not None else {}),
+        },
         log_path=str(output_dir / "joybrain_vla_server.log"),
     )
     for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "RPENT_BASELINE_API_KEY"):

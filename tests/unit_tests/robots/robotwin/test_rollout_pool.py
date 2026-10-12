@@ -9,6 +9,7 @@ from robots.robotwin.rollout_pool import (
     GPU,
     JobLaunch,
     WorkerSlot,
+    make_gpu_groups,
     run_pool,
     select_gpus,
 )
@@ -171,3 +172,129 @@ def test_callback_failure_cleans_up_owned_process(tmp_path):
         )
     with pytest.raises(ProcessLookupError):
         os.kill(spawned[0], 0)
+
+
+def test_layouts_use_explicit_gpu_order():
+    gpus = [GPU(index, f"GPU-{index}", 32607, 32110) for index in range(8)]
+    colocated = make_gpu_groups(gpus, "colocated")
+    assert [(group.model_gpu.index, group.env_gpu.index) for group in colocated] == [
+        (index, index) for index in range(8)
+    ]
+    split = make_gpu_groups(gpus, "split")
+    assert [(group.model_gpu.index, group.env_gpu.index) for group in split] == [
+        (0, 1),
+        (2, 3),
+        (4, 5),
+        (6, 7),
+    ]
+    reversed_pair = make_gpu_groups(gpus[1::-1], "split")[0]
+    assert reversed_pair.model_gpu.index == 1 and reversed_pair.env_gpu.index == 0
+
+
+@pytest.mark.parametrize(
+    "gpus,layout",
+    [
+        ([], "split"),
+        (INVENTORY[:1], "split"),
+        (INVENTORY * 2, "split"),
+        (INVENTORY, "unknown"),
+    ],
+)
+def test_invalid_groups_fail_before_starting(gpus, layout):
+    with pytest.raises(ValueError):
+        make_gpu_groups(gpus, layout)
+
+
+def test_staggered_startup_does_not_serialize_execution_or_other_gpus(tmp_path):
+    slots = [
+        WorkerSlot("gpu0-first", "GPU-0", "fixture://model0", "GPU-model0"),
+        WorkerSlot("gpu0-second", "GPU-0", "fixture://model0", "GPU-model0"),
+        WorkerSlot("gpu1-first", "GPU-1", "fixture://model1", "GPU-model1"),
+    ]
+    starts = []
+    gate = tmp_path / "gate"
+    release = tmp_path / "release"
+
+    def build(job, slot):
+        ready = tmp_path / f"{job['job_id']}.ready"
+        code = (
+            "from pathlib import Path\nimport time,sys\n"
+            "gate,ready,release=map(Path,sys.argv[1:])\n"
+            "while not gate.exists(): time.sleep(0.01)\n"
+            "ready.write_text('ready')\n"
+            "while not release.exists(): time.sleep(0.01)\n"
+        )
+        return JobLaunch(
+            [sys.executable, "-c", code, str(gate), str(ready), str(release)],
+            dict(os.environ),
+            tmp_path / f"{job['job_id']}.log",
+            15,
+            ready_path=ready,
+            startup_timeout_s=10,
+        )
+
+    def on_start(job, slot, pid):
+        starts.append((job["job_id"], slot.slot_id, pid))
+        if len(starts) == 2:
+            assert [item[1] for item in starts] == ["gpu0-first", "gpu1-first"]
+            gate.touch()
+        if len(starts) == 3:
+            assert slot.slot_id == "gpu0-second"
+            assert (tmp_path / "first.ready").exists()
+            os.kill(starts[0][2], 0)
+            release.touch()
+
+    rows = run_pool(
+        [{"job_id": name} for name in ("first", "second", "third")],
+        slots,
+        build,
+        max_active=3,
+        on_start=on_start,
+        poll_s=0.01,
+    )
+    assert len(rows) == 3 and all(row["returncode"] == 0 for row in rows)
+    assert {row["model_gpu_uuid"] for row in rows} == {"GPU-model0", "GPU-model1"}
+
+
+def test_failed_startup_releases_slot_without_replaying_episode(tmp_path):
+    launches = []
+
+    def build(job, slot):
+        launches.append(job["job_id"])
+        return JobLaunch(
+            [sys.executable, "-c", "import time; time.sleep(20)"],
+            dict(os.environ),
+            tmp_path / f"{job['job_id']}.log",
+            10,
+            ready_path=tmp_path / f"{job['job_id']}.ready",
+            startup_timeout_s=0.1,
+        )
+
+    rows = run_pool(
+        [{"job_id": "first"}, {"job_id": "second"}],
+        [WorkerSlot("slot", "GPU-0", "fixture://model")],
+        build,
+        max_active=1,
+        poll_s=0.01,
+    )
+    assert launches == ["first", "second"]
+    assert all(row["runner_error"] == "startup_timeout" for row in rows)
+
+
+def test_stale_readiness_file_is_rejected(tmp_path):
+    ready = tmp_path / "ready"
+    ready.touch()
+    with pytest.raises(ValueError, match="already exists"):
+        run_pool(
+            [{"job_id": "only"}],
+            [WorkerSlot("slot", "GPU", "fixture://model")],
+            lambda job, slot: JobLaunch(
+                [sys.executable, "-c", "pass"],
+                dict(os.environ),
+                tmp_path / "log",
+                10,
+                ready_path=ready,
+            ),
+            max_active=1,
+        )
+    assert not (tmp_path / "log").exists()

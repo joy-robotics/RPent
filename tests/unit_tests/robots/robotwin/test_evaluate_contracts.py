@@ -73,6 +73,183 @@ def test_missing_gpu_never_aliases_existing_gpu(tmp_path, monkeypatch):
     assert not (tmp_path / "plan").exists()
 
 
+def test_measured_gpu_limits_allow_small_card_without_disabling_protection(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    gpu = GPU(0, "GPU-small-fixture", 32607, 31000)
+    monkeypatch.setattr(evaluate, "discover_gpus", lambda: [gpu])
+    arguments = ["--output-dir", str(tmp_path / "plan"), "--dry-run"]
+    with pytest.raises(RuntimeError, match="required=38000"):
+        evaluate.main(arguments)
+    assert (
+        evaluate.main(
+            arguments
+            + [
+                "--gpu-start-min-free-mib",
+                "30000",
+                "--gpu-runtime-min-free-mib",
+                "2048",
+            ]
+        )
+        == 0
+    )
+    plan = json.loads((tmp_path / "plan/plan.json").read_text())
+    assert plan["configuration"]["gpu_start_min_free_mib"] == 30000
+    assert plan["configuration"]["gpu_runtime_min_free_mib"] == 2048
+    evaluate.require_gpu_headroom([gpu], [GPU(0, gpu.uuid, 32607, 2048)], 2048)
+    with pytest.raises(RuntimeError, match="required=2048"):
+        evaluate.require_gpu_headroom([gpu], [GPU(0, gpu.uuid, 32607, 2047)], 2048)
+    with pytest.raises(RuntimeError, match="unavailable"):
+        evaluate.require_gpu_headroom([gpu], [], 2048)
+
+
+@pytest.mark.parametrize("startup,runtime", [(30000, 0), (30000, 1023), (1024, 2048)])
+def test_gpu_memory_limits_cannot_disable_safety(tmp_path, startup, runtime):
+    with pytest.raises(SystemExit):
+        evaluate.main(
+            [
+                "--output-dir",
+                str(tmp_path / "plan"),
+                "--dry-run",
+                "--gpu-start-min-free-mib",
+                str(startup),
+                "--gpu-runtime-min-free-mib",
+                str(runtime),
+            ]
+        )
+    assert not (tmp_path / "plan").exists()
+
+
+@pytest.mark.parametrize(
+    "layout,workers,models,capacity", [("colocated", 1, 8, 8), ("split", 5, 4, 20)]
+)
+def test_eight_card_dry_run_records_exact_layout(
+    tmp_path, monkeypatch, layout, workers, models, capacity
+):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    inventory = [GPU(index, f"GPU-{index}", 32607, 32110) for index in range(8)]
+    monkeypatch.setattr(evaluate, "discover_gpus", lambda: inventory)
+    monkeypatch.setattr(
+        evaluate.subprocess,
+        "Popen",
+        lambda *args, **kwargs: pytest.fail("dry run started a process"),
+    )
+    output = tmp_path / "plan"
+    assert (
+        evaluate.main(
+            [
+                "--gpu-ids",
+                "0,1,2,3,4,5,6,7",
+                "--gpu-layout",
+                layout,
+                "--workers-per-gpu",
+                str(workers),
+                "--gpu-start-min-free-mib",
+                "30052",
+                "--gpu-runtime-min-free-mib",
+                "2048",
+                "--dry-run",
+                "--output-dir",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    plan = json.loads((output / "plan.json").read_text())
+    assert plan["gpu_count"] == 8
+    assert plan["model_server_count"] == models
+    assert plan["worker_capacity"] == plan["max_active_planners"] == capacity
+    assert plan["gpu_layout"] == layout
+    pairs = [
+        (group["model_gpu"]["index"], group["env_gpu"]["index"])
+        for group in plan["gpu_groups"]
+    ]
+    assert pairs == (
+        [(index, index) for index in range(8)]
+        if layout == "colocated"
+        else [(0, 1), (2, 3), (4, 5), (6, 7)]
+    )
+
+
+@pytest.mark.parametrize(
+    "extra,error",
+    [
+        (["--gpu-ids", "0,1,2"], ValueError),
+        (["--gpu-ids", "0,1", "--max-active-planners", "6"], SystemExit),
+    ],
+)
+def test_split_layout_rejects_odd_cards_and_excess_planners(
+    tmp_path, monkeypatch, extra, error
+):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.setattr(
+        evaluate,
+        "discover_gpus",
+        lambda: [GPU(index, f"GPU-{index}", 160000, 150000) for index in range(3)],
+    )
+    with pytest.raises(error):
+        evaluate.main(
+            [
+                "--gpu-layout",
+                "split",
+                "--workers-per-gpu",
+                "5",
+                "--dry-run",
+                "--output-dir",
+                str(tmp_path / "plan"),
+                *extra,
+            ]
+        )
+    assert not (tmp_path / "plan").exists()
+
+
+def test_split_layout_respects_visibility_and_borrowed_service_scope(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        evaluate,
+        "discover_gpus",
+        lambda: [GPU(index, f"GPU-{index}", 160000, 150000) for index in range(4)],
+    )
+    arguments = [
+        "--gpu-layout",
+        "split",
+        "--gpu-ids",
+        "0,1",
+        "--dry-run",
+        "--output-dir",
+        str(tmp_path / "one"),
+    ]
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+    with pytest.raises(ValueError, match="visibility|outside"):
+        evaluate.main(arguments)
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0,1,2,3")
+    assert evaluate.main([*arguments, "--vla-endpoint", "ws://127.0.0.1:12345"]) == 0
+    with pytest.raises(SystemExit):
+        evaluate.main(
+            [
+                *arguments,
+                "--gpu-ids",
+                "0,1,2,3",
+                "--output-dir",
+                str(tmp_path / "two"),
+                "--vla-endpoint",
+                "ws://127.0.0.1:12345",
+            ]
+        )
+
+
+def test_startup_timeout_is_not_reported_as_planner_timeout(tmp_path):
+    row = evaluate.inspect_episode(
+        tmp_path, {"returncode": -15, "runner_error": "startup_timeout"}
+    )
+    assert row["stop_reason"] == "worker_startup_timeout"
+    assert row["official_success"] is None
+
+
 def test_unknown_worker_result_is_not_reported_as_normal_failure(tmp_path):
     row = evaluate.inspect_episode(tmp_path, {"returncode": 1, "runner_error": None})
     assert row["official_success"] is None and row["error"]
@@ -143,14 +320,20 @@ def test_controller_builds_native_cli_workers_without_legacy_wrapper(
     )
     monkeypatch.setattr(robot_spec, "_resolve_env_runtime_path", lambda args: tmp_path)
     closes = []
-    model = SimpleNamespace(
-        endpoint="ws://127.0.0.1:12345",
-        metadata={"ckpt_path": str(checkpoint)},
-        close=lambda: closes.append(True),
-    )
-    monkeypatch.setattr(
-        robot_spec, "_init_runtime", lambda *args: ([], {"model": model})
-    )
+
+    class Pool:
+        def __init__(self, groups, args, output, cache_root, check_resources):
+            self.endpoints = {gpu.uuid: "ws://127.0.0.1:12345"}
+            self.metadata = {gpu.uuid: {"ckpt_path": str(checkpoint)}}
+            self.check = check_resources
+
+        def start(self):
+            pass
+
+        def close(self):
+            closes.append(True)
+
+    monkeypatch.setattr(evaluate, "PolicyPool", Pool)
     monkeypatch.setattr(
         evaluate.subprocess,
         "Popen",
@@ -169,6 +352,22 @@ def test_controller_builds_native_cli_workers_without_legacy_wrapper(
     )
 
     def run(jobs, slots, build_launch, **callbacks):
+        clock = SimpleNamespace(monotonic=lambda: 100.0, time_ns=evaluate.time.time_ns)
+        monkeypatch.setattr(evaluate, "time", clock)
+        monkeypatch.setattr(
+            evaluate,
+            "discover_gpus",
+            lambda: [GPU(gpu.index, gpu.uuid, gpu.total_mib, 3000)],
+        )
+        assert callbacks["should_stop"]() is False
+        clock.monotonic = lambda: 200.0
+        monkeypatch.setattr(
+            evaluate,
+            "discover_gpus",
+            lambda: [GPU(gpu.index, gpu.uuid, gpu.total_mib, 2047)],
+        )
+        with pytest.raises(RuntimeError, match="required=2048"):
+            callbacks["should_stop"]()
         launch = build_launch(jobs[0], slots[0])
         assert launch.command[1:3] == ["-m", "rpent.cli.main"]
         assert not any("rpent_joybrain" in arg for arg in launch.command)
@@ -188,9 +387,150 @@ def test_controller_builds_native_cli_workers_without_legacy_wrapper(
     monkeypatch.setattr(evaluate, "run_pool", run)
     output = tmp_path / "run"
     assert (
-        evaluate.main(["--model", "openai:unit-test-only", "--output-dir", str(output)])
+        evaluate.main(
+            [
+                "--model",
+                "openai:unit-test-only",
+                "--gpu-runtime-min-free-mib",
+                "2048",
+                "--output-dir",
+                str(output),
+            ]
+        )
         == 0
     )
     summary = json.loads((output / "summary.json").read_text())
     assert summary["status"] == "complete" and summary["completed_attempts"] == 1
     assert closes
+
+
+@pytest.mark.parametrize(
+    "layout,workers,capacity", [("colocated", 1, 8), ("split", 5, 20)]
+)
+def test_native_workers_receive_environment_gpu_and_group_policy(
+    tmp_path, monkeypatch, layout, workers, capacity
+):
+    from types import SimpleNamespace
+
+    from robots.robotwin import robot_spec
+    from rpent.cli.main import _build_argparser
+
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    inventory = [
+        GPU(index, f"{tmp_path.name}-GPU-{index}", 32607, 32110) for index in range(8)
+    ]
+    monkeypatch.setattr(evaluate, "discover_gpus", lambda: inventory)
+    monkeypatch.setattr(evaluate, "init_output_dir", lambda path: None)
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    (checkpoint / "model.safetensors").write_bytes(b"unit-test-only")
+    monkeypatch.setattr(
+        robot_spec, "_resolve_vla_runtime_path", lambda args: checkpoint
+    )
+    monkeypatch.setattr(robot_spec, "_resolve_env_runtime_path", lambda args: tmp_path)
+    groups_seen = []
+
+    class Pool:
+        def __init__(self, groups, args, output, cache_root, check_resources):
+            groups_seen.extend(groups)
+            self.endpoints = {
+                group.model_gpu.uuid: f"ws://127.0.0.1:{12000 + group.model_gpu.index}"
+                for group in groups
+            }
+            self.metadata = {
+                group.model_gpu.uuid: {
+                    "ckpt_path": str(checkpoint),
+                    "owner_gpu": group.model_gpu.uuid,
+                }
+                for group in groups
+            }
+            self.check = check_resources
+
+        def start(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(evaluate, "PolicyPool", Pool)
+    monkeypatch.setattr(
+        evaluate.subprocess,
+        "Popen",
+        lambda *args, **kwargs: SimpleNamespace(wait=lambda timeout: 0),
+    )
+    monkeypatch.setattr(evaluate, "stop_process_group", lambda process: None)
+    monkeypatch.setattr(
+        evaluate,
+        "inspect_episode",
+        lambda *args: {
+            "official_success": False,
+            "loop_verified": True,
+            "stop_reason": "planner_stop",
+            "tool_calls": {"lingbot_act": 1},
+        },
+    )
+
+    def run(jobs, slots, build_launch, **callbacks):
+        assert len(slots) == capacity
+        assignments = {
+            group.env_gpu.uuid: group.model_gpu.uuid for group in groups_seen
+        }
+        caches = set()
+        for index, job in enumerate(jobs):
+            slot = slots[index % len(slots)]
+            launch = build_launch(job, slot)
+            parser = _build_argparser()
+            robot_spec._add_cli_args(parser, False)
+            worker_args = parser.parse_args(launch.command[3:])
+            metadata = json.loads(worker_args.recording_config.read_text())
+            assert (
+                worker_args.env_cuda_device
+                == launch.environment["CUDA_VISIBLE_DEVICES"]
+                == slot.gpu_uuid
+            )
+            assert slot.policy_gpu_uuid == assignments[slot.gpu_uuid]
+            assert metadata["policy_metadata"]["owner_gpu"] == slot.policy_gpu_uuid
+            assert metadata["assignment"]["model_gpu_uuid"] == slot.policy_gpu_uuid
+            assert worker_args.vla_endpoint == slot.endpoint
+            assert (
+                launch.ready_path == worker_args.recording_config.parent / "states.json"
+            )
+            assert launch.startup_timeout_s == 1800
+            caches.add(str(worker_args.runtime_cache_dir))
+            callbacks["on_start"](job, slot, index + 1)
+            callbacks["on_finish"](
+                {"job_id": job["job_id"], "returncode": 0, "runner_error": None}
+            )
+        assert len(caches) == capacity
+        return []
+
+    monkeypatch.setattr(evaluate, "run_pool", run)
+    output = tmp_path / "run"
+    assert (
+        evaluate.main(
+            [
+                "--model",
+                "openai:unit-test-only",
+                "--gpu-layout",
+                layout,
+                "--gpu-ids",
+                "0,1,2,3,4,5,6,7",
+                "--workers-per-gpu",
+                str(workers),
+                "--gpu-start-min-free-mib",
+                "30052",
+                "--gpu-runtime-min-free-mib",
+                "2048",
+                "--episodes-per-task",
+                str(capacity),
+                "--output-dir",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    summary = json.loads((output / "summary.json").read_text())
+    assert summary["status"] == "complete"
+    assert summary["completed_attempts"] == capacity
+    assert summary["model_server_count"] == len(groups_seen)

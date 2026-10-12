@@ -1,4 +1,4 @@
-"""Recorded RoboTwin evaluations using native RPent workers and one VLA per GPU."""
+"""Recorded RoboTwin evaluations with colocated or paired model/environment GPUs."""
 
 from __future__ import annotations
 
@@ -16,26 +16,42 @@ import tempfile
 import time
 from collections import Counter
 from contextlib import ExitStack
-from copy import copy
 from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from robots.robotwin import robot_spec
+from robots.robotwin.policy_pool import PolicyPool
 from robots.robotwin.recording import validate_trace, write_json
 from robots.robotwin.rollout_pool import (
+    GPU,
     JobLaunch,
     WorkerSlot,
     discover_gpus,
+    make_gpu_groups,
     run_pool,
     select_gpus,
     stop_process_group,
 )
-from rpent.dashboard.events import NullDashboardEventSink
 from rpent.utils.config import get_repo_root
 from rpent.utils.logging import get_logger, init_output_dir
 
 logger = get_logger("robotwin.eval")
+
+
+def require_gpu_headroom(
+    selected: list[GPU], inventory: list[GPU], minimum_free_mib: int
+) -> None:
+    """Reject unavailable or undersized devices without stopping existing jobs."""
+    available = {gpu.uuid: gpu for gpu in inventory}
+    for gpu in selected:
+        current = available.get(gpu.uuid)
+        if current is None or current.free_mib < minimum_free_mib:
+            free = current.free_mib if current is not None else "unavailable"
+            raise RuntimeError(
+                f"Insufficient GPU headroom on {gpu.uuid}: free={free} MiB, "
+                f"required={minimum_free_mib} MiB; no unrelated jobs will be stopped"
+            )
 
 
 def make_cells(
@@ -124,7 +140,9 @@ def inspect_episode(directory: Path, process: dict) -> dict:
         and isinstance(success, bool)
     )
     reason = (
-        "worker_timeout"
+        "worker_startup_timeout"
+        if process["runner_error"] == "startup_timeout"
+        else "worker_timeout"
         if process["runner_error"]
         else "initialization_or_worker_error"
         if not final
@@ -218,7 +236,39 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tasks", default="click_bell")
     parser.add_argument("--episodes-per-task", type=int, default=1)
     parser.add_argument("--gpu-ids", default="0")
-    parser.add_argument("--workers-per-gpu", type=int, default=1)
+    parser.add_argument(
+        "--gpu-layout",
+        choices=["colocated", "split"],
+        default="colocated",
+        help="Colocated: one VLA per GPU; split: consecutive GPU IDs form model/env pairs.",
+    )
+    parser.add_argument(
+        "--workers-per-gpu",
+        type=int,
+        default=1,
+        help="Worker slots per environment GPU (not per model GPU in split mode).",
+    )
+    parser.add_argument(
+        "--worker-startup-timeout-s",
+        type=int,
+        default=1800,
+        help="Maximum initialization time before the first complete observation.",
+    )
+    parser.add_argument(
+        "--gpu-start-min-free-mib",
+        type=int,
+        help=(
+            "Measured model/worker peak plus safety margin; "
+            "defaults to 30000 + 8000 * workers-per-gpu (colocated), "
+            "or max(30000, 8000 * workers-per-gpu) (split)."
+        ),
+    )
+    parser.add_argument(
+        "--gpu-runtime-min-free-mib",
+        type=int,
+        default=12000,
+        help="Minimum remaining GPU memory during execution (MiB, at least 1024).",
+    )
     parser.add_argument("--max-active-planners", type=int)
     parser.add_argument("--model", default=os.environ.get("RPENT_MODEL"))
     parser.add_argument("--base-url")
@@ -263,8 +313,20 @@ def main(argv: list[str] | None = None) -> int:
         or args.planner_timeout_s <= 0
         or args.max_tokens < 1
         or args.max_episode_steps < 1
+        or args.worker_startup_timeout_s <= 0
     ):
         parser.error("Invalid worker or planner budget")
+    if args.gpu_start_min_free_mib is None:
+        args.gpu_start_min_free_mib = (
+            30000 + 8000 * args.workers_per_gpu
+            if args.gpu_layout == "colocated"
+            else max(30000, 8000 * args.workers_per_gpu)
+        )
+    if (
+        args.gpu_runtime_min_free_mib < 1024
+        or args.gpu_start_min_free_mib < args.gpu_runtime_min_free_mib
+    ):
+        parser.error("GPU memory limits require startup >= runtime >= 1024 MiB")
     if any(
         value is not None
         for value in (args.cuda_device, args.env_cuda_device, args.vla_cuda_device)
@@ -273,19 +335,16 @@ def main(argv: list[str] | None = None) -> int:
     gpus = select_gpus(
         args.gpu_ids.split(","), discover_gpus(), os.environ.get("CUDA_VISIBLE_DEVICES")
     )
+    groups = make_gpu_groups(gpus, args.gpu_layout)
+    capacity = len(groups) * args.workers_per_gpu
     maximum = (
-        args.max_active_planners
-        if args.max_active_planners is not None
-        else len(gpus) * args.workers_per_gpu
+        args.max_active_planners if args.max_active_planners is not None else capacity
     )
-    if not 1 <= maximum <= len(gpus) * args.workers_per_gpu:
+    if not 1 <= maximum <= capacity:
         parser.error("Invalid max-active-planners")
-    if args.vla_endpoint and len(gpus) != 1:
-        parser.error("A borrowed VLA endpoint currently supports one selected GPU only")
-    if any(gpu.free_mib < 30000 + 8000 * args.workers_per_gpu for gpu in gpus):
-        raise RuntimeError(
-            "Insufficient GPU headroom; no existing jobs will be stopped"
-        )
+    if args.vla_endpoint and len(groups) != 1:
+        parser.error("A borrowed VLA endpoint supports one GPU group only")
+    require_gpu_headroom(gpus, gpus, args.gpu_start_min_free_mib)
     base_url = args.base_url or os.environ.get(
         "ANTHROPIC_BASE_URL"
         if (args.model or "").startswith("anthropic:")
@@ -317,6 +376,9 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("Generated task/seed plan differs from the frozen parent")
     pending = resume.pending if resume is not None else cells
     output = args.output_dir.expanduser().resolve()
+    args.runtime_cache_dir = (
+        (args.runtime_cache_dir or output / "runtime-cache").expanduser().resolve()
+    )
     output.mkdir(parents=True, exist_ok=False)
     plan = {
         "kind": "robotwin_evaluation",
@@ -326,6 +388,12 @@ def main(argv: list[str] | None = None) -> int:
         if resume is not None
         else None,
         "gpu_count": len(gpus),
+        "gpu_layout": args.gpu_layout,
+        "gpu_groups": [asdict(group) for group in groups],
+        "model_server_count": len(groups),
+        "worker_capacity": capacity,
+        "worker_lifecycle": "new process per episode; model services remain shared",
+        "worker_startup": "one initializing worker per environment GPU until states.json",
         "workers_per_gpu": args.workers_per_gpu,
         "max_active_planners": maximum,
         "cells": cells,
@@ -336,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
         "base_url": base_url,
         "physical_gpus": [asdict(gpu) for gpu in gpus],
         "training_eligible": False,
-        "policy_execution": "one serial VLA service per GPU; no dynamic batching",
+        "policy_execution": "one serial VLA service per model GPU; no dynamic batching",
         "policy_randomness": "server RNG; scene seeds do not fix VLA action noise",
     }
     write_json(output / "plan.json", plan)
@@ -400,23 +468,32 @@ def main(argv: list[str] | None = None) -> int:
             and (
                 resume.summary.get("mixed_concurrency")
                 or resume.summary["workers_per_gpu"] != args.workers_per_gpu
+                or resume.summary["gpu_count"] != len(gpus)
+                or resume.plan.get("gpu_layout", "colocated") != args.gpu_layout
             )
         ),
         "gpu_count": len(gpus),
+        "gpu_layout": args.gpu_layout,
+        "model_server_count": len(groups),
+        "worker_capacity": capacity,
         "workers_per_gpu": args.workers_per_gpu,
         "training_eligible": False,
     }
     save_results(output, summary, cells)
     environment = dict(os.environ)
     environment["PYTHONPATH"] = str(get_repo_root())
-    services = {}
-    policy_metadata = {}
-    daemons = []
     last_check = 0.0
 
+    def check_resources():
+        nonlocal last_check
+        if time.monotonic() - last_check > 1:
+            last_check = time.monotonic()
+            require_gpu_headroom(gpus, discover_gpus(), args.gpu_runtime_min_free_mib)
+
+    pool = PolicyPool(groups, args, output, args.runtime_cache_dir, check_resources)
+
     def stop_services():
-        for daemon in reversed(daemons):
-            daemon.stop()
+        pool.close()
 
     def interrupted(signum, frame):
         raise KeyboardInterrupt(f"signal {signum}")
@@ -436,6 +513,7 @@ def main(argv: list[str] | None = None) -> int:
                 lease = leases.enter_context(os.fdopen(descriptor, "a+"))
                 fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
             leases.callback(stop_services)
+            require_gpu_headroom(gpus, discover_gpus(), args.gpu_start_min_free_mib)
             check_command = [
                 sys.executable,
                 "-m",
@@ -464,36 +542,16 @@ def main(argv: list[str] | None = None) -> int:
                     raise RuntimeError(
                         "Planner preflight failed; see planner-check.log"
                     )
-            for gpu in gpus:
-                directory = output / f"policy_gpu_{gpu.index}"
-                directory.mkdir()
-                options = copy(args)
-                options.task_name, options.seed = cells[0]["task"], cells[0]["seed"]
-                options.vla_cuda_device = gpu.uuid
-                owned, runtime = robot_spec._init_runtime(
-                    options, directory, NullDashboardEventSink(), {"vla"}
-                )
-                daemons.extend(owned)
-                model = runtime["model"]
-                try:
-                    services[gpu.uuid] = model.endpoint
-                    policy_metadata[gpu.uuid] = dict(model.metadata)
-                    write_json(
-                        directory / "metadata.json",
-                        {
-                            "gpu": asdict(gpu),
-                            "endpoint": model.endpoint,
-                            "policy": model.metadata,
-                        },
-                    )
-                finally:
-                    model.close()
+            pool.start()
             slots = [
                 WorkerSlot(
-                    f"gpu{gpu.index}_worker{worker}", gpu.uuid, services[gpu.uuid]
+                    f"gpu{group.env_gpu.index}_worker{worker}",
+                    group.env_gpu.uuid,
+                    pool.endpoints[group.model_gpu.uuid],
+                    group.model_gpu.uuid,
                 )
                 for worker in range(args.workers_per_gpu)
-                for gpu in gpus
+                for group in groups
             ]
             by_id = {cell["job_id"]: cell for cell in cells}
 
@@ -513,7 +571,7 @@ def main(argv: list[str] | None = None) -> int:
                         **plan,
                         "cell": cell,
                         "assignment": asdict(slot),
-                        "policy_metadata": policy_metadata[slot.gpu_uuid],
+                        "policy_metadata": pool.metadata[slot.policy_gpu_uuid],
                     },
                 )
                 command = [
@@ -537,6 +595,13 @@ def main(argv: list[str] | None = None) -> int:
                     str(cell["seed"]),
                     "--env-cuda-device",
                     slot.gpu_uuid,
+                    "--runtime-cache-dir",
+                    str(
+                        args.runtime_cache_dir
+                        / "workers"
+                        / slot.gpu_uuid
+                        / slot.slot_id
+                    ),
                     "--robotwin-assets-path",
                     str(robot_spec._resolve_env_runtime_path(args)),
                     "--max-episode-steps",
@@ -569,7 +634,9 @@ def main(argv: list[str] | None = None) -> int:
                     command,
                     {**environment, "CUDA_VISIBLE_DEVICES": slot.gpu_uuid},
                     directory / "console.log",
-                    args.planner_timeout_s + 360,
+                    args.worker_startup_timeout_s + args.planner_timeout_s + 60,
+                    ready_path=directory / "states.json",
+                    startup_timeout_s=args.worker_startup_timeout_s,
                 )
 
             def started(cell, slot, pid):
@@ -600,6 +667,8 @@ def main(argv: list[str] | None = None) -> int:
                         "directory": str(output),
                         "workers_per_gpu": args.workers_per_gpu,
                         "gpu_count": len(gpus),
+                        "gpu_layout": args.gpu_layout,
+                        "model_server_count": len(groups),
                     },
                 )
                 write_json(directory / "evaluation.json", row)
@@ -611,16 +680,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
             def stop_requested():
-                nonlocal last_check
-                if time.monotonic() - last_check > 5:
-                    last_check = time.monotonic()
-                    available = {gpu.uuid: gpu for gpu in discover_gpus()}
-                    if any(
-                        gpu.uuid not in available
-                        or available[gpu.uuid].free_mib < 12000
-                        for gpu in gpus
-                    ):
-                        raise RuntimeError("Selected GPU has insufficient free memory")
+                pool.check()
                 return (output / "STOP_AFTER_CURRENT").exists()
 
             summary["status"] = "running"

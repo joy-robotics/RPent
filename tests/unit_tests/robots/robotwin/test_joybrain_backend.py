@@ -141,6 +141,8 @@ def test_checkpoint_validation_and_spawn_are_in_tree(checkpoint, tmp_path, monke
             "/policy/python",
             "--vla-cuda-device",
             "2",
+            "--runtime-cache-dir",
+            str(tmp_path / "private-cache"),
         ]
     )
     assert validate_checkpoint(checkpoint) == checkpoint
@@ -153,6 +155,10 @@ def test_checkpoint_validation_and_spawn_are_in_tree(checkpoint, tmp_path, monke
     assert daemon.subprocess_env["CUDA_VISIBLE_DEVICES"] == "2"
     assert not any("rpent_joybrain" in part for part in daemon.cmd)
     assert endpoint[0] == "127.0.0.1"
+    assert daemon.subprocess_env["WARP_CACHE_PATH"] == str(
+        tmp_path / "private-cache/vla/warp"
+    )
+    assert (tmp_path / "private-cache/vla/xdg/torch/kernels").is_dir()
 
 
 def test_wrong_embodiment_not_accepted_even_with_same_dimensions(checkpoint):
@@ -231,6 +237,9 @@ def policy_server(metadata):
                         "chunk_size": 16,
                     },
                 }
+                if query["type"] == "ping":
+                    response["type"] = "ping"
+                    response.pop("data")
                 if state.response_change:
                     response = state.response_change(response)
                 connection.send(pack(response))
@@ -271,6 +280,25 @@ def test_wrong_checkpoint_rejected(policy_server):
         JoyBrainVLAClient(
             policy_server.endpoint, expected_checkpoint="/other/checkpoint"
         )
+
+
+def test_keepalive_does_not_infer_or_mutate_actions(policy_server, observation):
+    with JoyBrainVLAClient(policy_server.endpoint) as model:
+        model.ping()
+        result = model.infer(observation)
+    assert result.shape == (16, 14)
+    assert [request["type"] for request in policy_server.requests] == ["ping", "infer"]
+    assert "payload" not in policy_server.requests[0]
+
+
+def test_invalid_keepalive_closes_without_replay(policy_server):
+    policy_server.response_change = lambda response: {**response, "request_id": "stale"}
+    model = JoyBrainVLAClient(policy_server.endpoint)
+    with pytest.raises(ValueError, match="keepalive"):
+        model.ping()
+    with pytest.raises(RuntimeError, match="closed"):
+        model.ping()
+    assert len(policy_server.requests) == 1
 
 
 def test_stale_response_closes_without_replay(policy_server, observation):
