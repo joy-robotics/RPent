@@ -100,6 +100,10 @@ class NativeRecorder:
         self.action_index = 0
         self.actions_by_source: dict[str, int] = {}
         self.proposals = 0
+        self._attached_task = None
+        self._original_action = None
+        self._attached_action = None
+        self._had_instance_action = False
         self.last_status = None
         self.failed = False
         write_json(
@@ -190,6 +194,11 @@ class NativeRecorder:
 
     def attach(self, task: Any) -> None:
         """Observe native calls without splitting RPC chunks or changing controls."""
+        if (
+            self._attached_task is not None
+            or getattr(task.take_action, "_rpent_recorder", None) is not None
+        ):
+            raise RuntimeError("A native recorder is already attached")
         original = task.take_action
 
         def take_action(action, *args, **kwargs):
@@ -271,7 +280,33 @@ class NativeRecorder:
                     pass
                 raise
 
+        guarded_action._rpent_recorder = self
+        self._had_instance_action = "take_action" in vars(task)
+        self._attached_task = task
+        self._original_action = original
+        self._attached_action = guarded_action
         task.take_action = guarded_action
+
+    def detach(self) -> None:
+        """Restore the action method only after a fully attributed episode."""
+        if self.context is not None or self.failed:
+            raise RuntimeError("Cannot detach an active or failed recorder")
+        task = self._attached_task
+        if task is None:
+            return
+        if task.take_action is not self._attached_action:
+            raise RuntimeError("Native action hook changed while recording")
+        if self._had_instance_action:
+            task.take_action = self._original_action
+        else:
+            del task.take_action
+        self._attached_task = None
+        self._original_action = None
+        self._attached_action = None
+
+    def is_attached_to(self, task: Any) -> bool:
+        """Report whether this recorder still owns the native action boundary."""
+        return self._attached_task is task and task.take_action is self._attached_action
 
     def summary(self) -> dict:
         """Persist confirmed counts; uncertainty never becomes a training label."""

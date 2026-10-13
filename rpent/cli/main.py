@@ -329,11 +329,16 @@ def _start_continuation_session(
     return planner, system_prompt, session_message
 
 
-def main() -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    runtime_initializer: Callable | None = None,
+) -> int:
+    """Run one CLI episode, optionally using a caller-owned headless runtime."""
     parser = _build_argparser()
     # Two-phase argparse: first grab --robot / --env / --dashboard so we know
     # which robot's flags to add and whether to make its required flags optional.
-    early, _ = parser.parse_known_args()
+    early, _ = parser.parse_known_args(argv)
 
     # --env is a deprecated alias for --robot; resolve it before loading the spec.
     if early.env_name is not None:
@@ -342,7 +347,8 @@ def main() -> int:
         logger.warning("--env is deprecated and will be removed; use --robot instead")
         early.robot_name = early.env_name
     if early.robot_name is None:
-        if "-h" not in sys.argv and "--help" not in sys.argv:
+        arguments = sys.argv[1:] if argv is None else argv
+        if "-h" not in arguments and "--help" not in arguments:
             parser.error("--robot is required")
     else:
         robot_spec = get_robot_spec(early.robot_name)
@@ -354,8 +360,12 @@ def main() -> int:
         default=argparse.SUPPRESS,
         help="show this help message and exit",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     args.robot_name = early.robot_name
+    if runtime_initializer is not None and (
+        args.dashboard or args.interactive or args.explore or args.planner != "api"
+    ):
+        parser.error("Caller-owned runtimes require non-interactive API evaluation")
     human_interactive_exploration = (
         args.explore and robot_spec.supports_human_interactive_exploration
     )
@@ -439,7 +449,8 @@ def main() -> int:
 
     # mkdir + logging wiring (robot-side already picked the path).
     output_dir = init_output_dir(output_dir, verbose=args.verbose)
-    logger.info("physical agent cmd: %s", shlex.join([sys.executable, *sys.argv]))
+    command = sys.argv if argv is None else ["-m", "rpent.cli.main", *argv]
+    logger.info("physical agent cmd: %s", shlex.join([sys.executable, *command]))
 
     prepare_run_memory(args, robot_spec, run_config)
 
@@ -510,7 +521,8 @@ def main() -> int:
         await_first_prompt = start_first_prompt_resolver(input_queue)
 
     # --- initialise robot runtime --------------------------------------------
-    daemons, runtime_kwargs = robot_spec.init_runtime(
+    initialize_runtime = runtime_initializer or robot_spec.init_runtime
+    daemons, runtime_kwargs = initialize_runtime(
         args,
         output_dir,
         dashboard_events,

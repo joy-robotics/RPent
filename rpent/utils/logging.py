@@ -30,6 +30,17 @@ _log_initialized = False
 _output_dir: Path | None = None
 
 
+def reset_output_logging() -> None:
+    """Close run handlers before starting another isolated run in this process."""
+    global _log_initialized, _output_dir
+    pkg_logger = logging.getLogger(_PKG_LOGGER_NAME)
+    for handler in list(pkg_logger.handlers):
+        pkg_logger.removeHandler(handler)
+        handler.close()
+    _log_initialized = False
+    _output_dir = None
+
+
 class _ColourFormatter(logging.Formatter):
     """Colour only the level marker; never mutates the shared record."""
 

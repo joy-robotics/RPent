@@ -639,7 +639,9 @@ def test_full_cli_exploration_finalizes_memory_without_starting_gpu_runtime(
     ]
 
 
-@pytest.mark.parametrize("planner_name", ["codex", "flash"])
+@pytest.mark.parametrize(
+    "planner_name,owned_runtime", [("codex", False), ("flash", False), ("api", True)]
+)
 @pytest.mark.parametrize(
     "planner_error", [None, "RuntimeError: Grasp not held; replay stopped"]
 )
@@ -647,6 +649,7 @@ def test_full_cli_calls_robot_result_finalizer_without_robot_special_case(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     planner_name: str,
+    owned_runtime: bool,
     planner_error: str | None,
 ) -> None:
     cli = _cli_module()
@@ -755,7 +758,14 @@ def test_full_cli_calls_robot_result_finalizer_without_robot_special_case(
         ],
     )
 
-    assert cli.main() == (1 if planner_error else 0)
+    def resident_runtime(*args):
+        return [], {"runtime": "resident"}
+
+    if owned_runtime:
+        code = cli.main(sys.argv[1:], runtime_initializer=resident_runtime)
+    else:
+        code = cli.main()
+    assert code == (1 if planner_error else 0)
     transcript = json.loads((tmp_path / "transcript_OpenDrawer_s1.json").read_text())
     assert transcript["error"] == planner_error
 
@@ -777,4 +787,4 @@ def test_full_cli_calls_robot_result_finalizer_without_robot_special_case(
         "planner_claim": {"status": "success", "summary": "planner claim"},
     }
     assert robot_toolkit.closed is True
-    assert daemon.stopped is True
+    assert daemon.stopped is not owned_runtime
