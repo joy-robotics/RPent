@@ -493,6 +493,7 @@ def test_native_workers_receive_environment_gpu_and_group_policy(
             assert metadata["policy_metadata"]["owner_gpu"] == slot.policy_gpu_uuid
             assert metadata["assignment"]["model_gpu_uuid"] == slot.policy_gpu_uuid
             assert worker_args.vla_endpoint == slot.endpoint
+            assert worker_args.joybrain_timeout == 600
             assert (
                 launch.ready_path == worker_args.recording_config.parent / "states.json"
             )
@@ -518,6 +519,8 @@ def test_native_workers_receive_environment_gpu_and_group_policy(
                 "0,1,2,3,4,5,6,7",
                 "--workers-per-gpu",
                 str(workers),
+                "--joybrain-timeout",
+                "600",
                 "--gpu-start-min-free-mib",
                 "30052",
                 "--gpu-runtime-min-free-mib",

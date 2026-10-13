@@ -584,6 +584,8 @@ def main(argv: list[str] | None = None) -> int:
                     "joybrain",
                     "--vla-endpoint",
                     slot.endpoint,
+                    "--joybrain-timeout",
+                    str(args.joybrain_timeout),
                     "--record-actions",
                     "--recording-config",
                     str(metadata),
