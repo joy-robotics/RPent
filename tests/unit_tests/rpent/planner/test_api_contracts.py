@@ -111,6 +111,7 @@ def solve(tmp_path, model, toolkit=None, events=None, **kwargs):
             "no_images",
             "reasoning_effort",
             "interactive",
+            "max_history_images",
         )
         if key in kwargs
     }
@@ -312,6 +313,61 @@ def test_multimodal_tool_results_and_dashboard_events(tmp_path, no_images):
     assert "Ready." in serialized
     assert "aW1hZ2U=" not in serialized
     assert any(m.get("name") == "observe" for m in result.messages)
+
+
+def test_long_multimodal_run_stays_below_provider_image_limit(tmp_path):
+    from rpent.planner.image_budget import image_count
+
+    events = Events()
+    toolkit = RobotToolkit(events)
+    observations = []
+
+    def observe_three():
+        number = len(observations)
+        observations.append(number)
+        return {
+            "number": number,
+            "_image_bytes": f"head-{number}".encode(),
+            "_image_wrist_bytes": f"wrist-{number}".encode(),
+            "_image_cam_bytes": f"other-{number}".encode(),
+        }
+
+    toolkit.register("observe_three", observe_three)
+    requests = []
+
+    async def stream(messages, info):
+        requests.append(copy.deepcopy(messages))
+        assert image_count(messages) <= 48
+        if len(requests) <= 20:
+            yield tool("observe_three")
+        else:
+            yield finish()
+
+    result, _, _ = solve(
+        tmp_path,
+        FunctionModel(stream_function=stream),
+        toolkit,
+        events,
+        max_turns=24,
+        max_history_images=48,
+    )
+    assert result.error is None and result.finish_result["_finish"]
+    assert result.stats["turns_used"] == 21
+    assert len(observations) == 20
+    assert (
+        len(
+            [
+                message
+                for message in result.messages
+                if message.get("name") == "observe_three"
+            ]
+        )
+        == 20
+    )
+    assert result.stats["image_budget"]["trimmed_requests"] > 0
+    assert result.stats["image_budget"]["maximum_images_sent"] == 48
+    assert "head-19" in repr(requests[-1])
+    assert "head-0'" not in repr(requests[-1])
 
 
 @pytest.fixture
@@ -903,10 +959,12 @@ def test_factory_passes_interactive_mode(tmp_path, monkeypatch):
         model="test:test",
         dashboard_events=Events(),
         interactive=True,
+        max_history_images=48,
     )
     assert isinstance(planner, ApiAgentLoop)
     assert isinstance(planner, Planner)
     assert planner.interactive is True
+    assert planner.max_history_images == 48
 
 
 def test_offline_http_planner_executes_action_and_finish(tmp_path):

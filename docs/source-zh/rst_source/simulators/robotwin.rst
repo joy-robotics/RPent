@@ -242,3 +242,36 @@ RPent 默认使用 RoboTwin 的 ``demo_randomized`` 任务配置，该配置带�
      --max-episode-steps 10000
 
 本例运行 ``beat_block_hammer`` 的 seed 100000。复现全部成绩时，按 ``demo_randomized.json`` 为每个任务逐一运行其中列出的 seed。运行前还需按照本页前文配置 RoboTwin 仿真资源和 LingBot-VLA checkpoint。每次运行仅在 ``TASK_ENV.eval_success`` 的最终值为 ``true`` 时计为成功；规划器调用 ``finish`` 本身不代表成功。
+
+Joy-Brain 批量评测与轨迹记录
+----------------------------
+
+``python -m robots.robotwin.evaluate`` 支持 ``demo_clean`` 和 ``demo_randomized``，
+为每条轨迹建立独立 Agent 会话。不传 ``--eval-manifest`` 时仅使用仓库内置的
+``demo_randomized`` 种子表；clean 必须显式提供自己的种子表，不会偷偷套用 random 种子。
+
+清单包含 ``task_config`` 和 ``tasks`` 映射，例如
+``{"task_config": "demo_clean", "tasks": {"click_bell": [{"seed": 100000}]}}``。
+这只是格式示例，不表示该种子已经专家验证。可用 ``seed_source`` 说明来源；外部清单
+未提供此字段时标为 ``provided_manifest``。选种不得依赖 VLA/Agent 运行结果。
+
+在配置 GPU、模型、预算和输出目录的同时，传入
+``--tasks all --episodes-per-task 5 --task-config demo_clean
+--eval-manifest /path/to/clean-seeds.json``。random 使用自己的清单另跑一批，输出目录
+不要与 clean 共用。先检查 ``--dry-run`` 计划；计划记录种子文件路径和 SHA-256，
+续跑时若清单内容改变则拒绝执行。
+
+启用动作记录后，每条保留 Agent 对话、工具与状态记录、视频、带对齐相机观测的原生
+动作 trace、策略元信息、原生成败及错误详情。失败尝试不会被悄悄补跑替换。
+``STOP_AFTER_CURRENT`` 停止派发并等待在途任务结束；``--resume-from`` 只接续正常
+排空批次中尚未尝试的条目。硬中断或执行不确定的记录必须先检查。
+
+``--episode-error-policy continue`` 为默认策略：把单条异常另存到
+``episode_errors/``，结束该条并派发下一个未尝试的条目，不重发不确定的原生动作，
+也不接受偷偷替换的seed。设为 ``stop`` 则在单条异常后排空批次。GPU显存或存储
+故障始终停止派发；共享服务及资源保护不会因continue关闭。正常的原生任务失败
+不属于基础设施异常，异常处理也不会改写原生成败判定。
+
+可按所用API上限配置 ``--api-image-limit 48``。续跑时改变图片历史预算，必须显式
+传入 ``--allow-image-context-change-on-resume``；计划记录前后设置及源码指纹，
+其他冻结的模型、种子、策略和预算仍受保护。旧的异常尝试保留，不会被补跑悄悄替换。

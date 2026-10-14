@@ -90,6 +90,12 @@ runs are not guaranteed to produce identical action chunks.
 
 ## Startup and worker lifetime
 
+An opt-in, single-task resident-worker experiment is available through
+`python -m robots.robotwin.resident_evaluate`; see [RESIDENT_ROLLOUT.md](RESIDENT_ROLLOUT.md).
+It retains worker/Env processes while resetting native scenes and isolating
+episode clients, conversations and recorders. It does not change the default
+evaluator's per-episode process lifetime described here.
+
 Model processes are spawned before the controller waits for readiness, rather
 than loading eight models sequentially. Each established connection sends a
 lightweight protocol keepalive so an idle model is not discarded while slow

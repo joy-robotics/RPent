@@ -51,6 +51,11 @@ Joy-Brain 通常用 `16+16+16+2` 填充 50 动作窗口。预处理和反归一�
 
 ## 验证与并行
 
+常驻 worker 的独立试验入口为 `python -m robots.robotwin.resident_evaluate`。
+当前只支持同卡每卡一份 VLA、一个常驻 worker 和单一任务；会保留进程，但按原生
+流程刷新每个 seed 的场景/语言并隔离会话与记录器。见 [RESIDENT_ROLLOUT.md](RESIDENT_ROLLOUT.md)。
+下述默认 `evaluate` 入口仍是每个 episode 新建 worker，未被常驻模式替换。
+
 CPU 回归：`python -m pytest -q tests/unit_tests/robots/robotwin`。
 真实组件测试入口为 [joybrain_smoke.py](../../tests/e2e_tests/robotwin/joybrain_smoke.py)，
 使用同样的 VLA/环境参数，另传 `--output`；该测试不调用高层 LLM，不代表任务成功率。

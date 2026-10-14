@@ -153,6 +153,11 @@ def _build_argparser() -> argparse.ArgumentParser:
     ap.add_argument("--max-turns", type=int, default=100)
     ap.add_argument("--max-tokens", type=int, default=8192)
     ap.add_argument(
+        "--api-image-limit",
+        type=int,
+        help="Send at most this many newest user/tool images per API request; keep all recorded artifacts.",
+    )
+    ap.add_argument(
         "--reasoning-effort",
         choices=REASONING_EFFORTS,
         default="none",
@@ -306,6 +311,7 @@ def _start_continuation_session(
         claude_code_max_budget_usd=args.claude_code_max_budget_usd,
         dashboard_events=dashboard_events,
         no_images=args.no_images,
+        max_history_images=getattr(args, "api_image_limit", None),
         interactive=args.interactive,
     )
     system_prompt = prompt_bundle.render(
@@ -385,6 +391,12 @@ def main(
         if sys.stdin is None or not sys.stdin.isatty():
             parser.error("This robot requires a TTY for operator confirmation.")
     native_cli = args.interactive and args.planner == "api"
+    if args.api_image_limit is not None and (
+        args.api_image_limit < 1 or args.planner != "api"
+    ):
+        parser.error(
+            "--api-image-limit requires the API planner and a positive integer"
+        )
     if args.base_url and args.planner in BASE_URL_ENV_BY_PLANNER:
         parser.error(
             "--base-url applies to the 'api' planner only; "
@@ -470,6 +482,7 @@ def main(
         claude_code_max_budget_usd=args.claude_code_max_budget_usd,
         dashboard_events=dashboard_events,
         no_images=args.no_images,
+        max_history_images=args.api_image_limit,
         interactive=args.interactive,
     )
     prompt_bundle = robot_spec.prompts

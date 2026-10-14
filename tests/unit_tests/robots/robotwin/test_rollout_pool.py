@@ -126,6 +126,42 @@ def test_failure_and_timeout_do_not_stop_other_jobs(tmp_path):
         outsider.wait()
 
 
+@pytest.mark.parametrize("policy,expected", [("continue", 2), ("stop", 1)])
+def test_recording_exception_policy_keeps_evidence_and_controls_next_job(
+    tmp_path, policy, expected
+):
+    from robots.robotwin.evaluate import error_disposition
+
+    decisions = []
+
+    def finished(process):
+        if process["job_id"] == "bad_recording":
+            decisions.append(
+                error_disposition(
+                    {
+                        "trace_error": "missing transition",
+                        "stop_reason": "planner_stop",
+                    },
+                    policy,
+                )
+            )
+
+    rows = run_pool(
+        [{"job_id": "bad_recording"}, {"job_id": "next_episode"}],
+        [WorkerSlot("slot", INVENTORY[0].uuid, "fixture://policy")],
+        launch_factory(tmp_path),
+        max_active=1,
+        on_finish=finished,
+        should_stop=lambda: bool(
+            decisions and decisions[-1]["action"] == "drain_and_stop"
+        ),
+    )
+    assert len(rows) == expected
+    assert (tmp_path / "bad_recording.log").is_file()
+    assert decisions[0]["replay"] is False and decisions[0]["artifacts_preserved"]
+    assert len({row["job_id"] for row in rows}) == expected
+
+
 def test_active_session_cap_and_stop_after_current(tmp_path):
     slots = [
         WorkerSlot(f"slot{index}", INVENTORY[0].uuid, "fixture://policy")

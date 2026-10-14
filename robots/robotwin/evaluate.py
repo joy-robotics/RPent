@@ -39,6 +39,88 @@ from rpent.utils.logging import get_logger, init_output_dir
 logger = get_logger("robotwin.eval")
 
 
+def episode_exception_kind(row: dict) -> str | None:
+    """Classify failed attempts without converting a native failure into an error."""
+    text = f"{row.get('error') or ''} {row.get('trace_error') or ''}".lower()
+    if any(
+        marker in text
+        for marker in (
+            "cuda out of memory",
+            "cuda error: out of memory",
+            "outofmemoryerror",
+        )
+    ):
+        return "gpu_memory_failure"
+    if any(
+        marker in text for marker in ("no space left on device", "disk quota exceeded")
+    ):
+        return "storage_failure"
+    if row.get("trace_error"):
+        return "recording_error"
+    reason = row.get("stop_reason")
+    if reason in {
+        "worker_startup_timeout",
+        "worker_timeout",
+        "initialization_or_worker_error",
+        "analysis_error",
+        "planner_error",
+        "planner_timeout",
+    }:
+        return reason
+    if row.get("error"):
+        return "worker_error"
+    return None
+
+
+def error_disposition(row: dict, policy: str) -> dict | None:
+    """Decide whether to continue dispatch, never whether to replay native actions."""
+    if policy not in {"continue", "stop"}:
+        raise ValueError("Invalid episode error policy")
+    kind = episode_exception_kind(row)
+    if kind is None:
+        return None
+    stop = policy == "stop" or kind in {"gpu_memory_failure", "storage_failure"}
+    return {
+        "kind": kind,
+        "action": "drain_and_stop" if stop else "skip_and_continue",
+        "replay": False,
+        "artifacts_preserved": True,
+    }
+
+
+def load_eval_manifest(path: Path, task_config: str) -> tuple[dict, str]:
+    """Validate a track-specific seed inventory and fingerprint its original bytes."""
+    content = path.read_bytes()
+    manifest = json.loads(content)
+    if not isinstance(manifest, dict):
+        raise ValueError("Seed manifest must be a JSON object")
+    if manifest.get("task_config") != task_config:
+        raise ValueError("Seed manifest task_config does not match the requested track")
+    tasks = manifest.get("tasks")
+    if not isinstance(tasks, dict) or not tasks:
+        raise ValueError("Seed manifest requires a nonempty task mapping")
+    for task, entries in tasks.items():
+        if (
+            not isinstance(task, str)
+            or not task
+            or not isinstance(entries, list)
+            or not entries
+        ):
+            raise ValueError(
+                "Seed manifest requires named tasks with nonempty seed lists"
+            )
+        seeds = [
+            entry.get("seed") if isinstance(entry, dict) else None for entry in entries
+        ]
+        if any(type(seed) is not int or seed < 0 for seed in seeds) or len(
+            set(seeds)
+        ) != len(seeds):
+            raise ValueError(f"Invalid or duplicate seeds in manifest task {task}")
+    if not isinstance(manifest.get("seed_source", "provided_manifest"), str):
+        raise ValueError("Seed provenance must be a string")
+    return manifest, hashlib.sha256(content).hexdigest()
+
+
 def require_gpu_headroom(
     selected: list[GPU], inventory: list[GPU], minimum_free_mib: int
 ) -> None:
@@ -81,7 +163,9 @@ def make_cells(
         selected[name] = [
             (
                 value,
-                "official_manifest" if value in seeds else "fixed_not_expert_verified",
+                manifest.get("seed_source", "official_manifest")
+                if value in seeds
+                else "fixed_not_expert_verified",
             )
             for value in chosen
         ]
@@ -187,6 +271,9 @@ def save_results(output: Path, summary: dict, cells: list[dict]) -> None:
         row["official_success"] is True for row in episodes
     )
     summary["valid_loops"] = sum(row["loop_verified"] for row in episodes)
+    summary["episode_exceptions"] = sum(
+        episode_exception_kind(row) is not None for row in episodes
+    )
     write_json(output / "summary.json", summary)
     rows = []
     for task, planned in Counter(cell["task"] for cell in cells).items():
@@ -235,6 +322,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--tasks", default="click_bell")
     parser.add_argument("--episodes-per-task", type=int, default=1)
+    parser.add_argument(
+        "--eval-manifest",
+        type=Path,
+        help="Explicit track-specific seed JSON; required for demo_clean.",
+    )
     parser.add_argument("--gpu-ids", default="0")
     parser.add_argument(
         "--gpu-layout",
@@ -270,6 +362,22 @@ def main(argv: list[str] | None = None) -> int:
         help="Minimum remaining GPU memory during execution (MiB, at least 1024).",
     )
     parser.add_argument("--max-active-planners", type=int)
+    parser.add_argument(
+        "--episode-error-policy",
+        choices=["continue", "stop"],
+        default="continue",
+        help="Preserve a failed attempt and continue, or drain the batch; resource failures always stop.",
+    )
+    parser.add_argument(
+        "--api-image-limit",
+        type=int,
+        help="Maximum newest images sent per API request; raw recordings are unchanged.",
+    )
+    parser.add_argument(
+        "--allow-image-context-change-on-resume",
+        action="store_true",
+        help="Explicitly record an API image-history budget change while resuming unattempted cells.",
+    )
     parser.add_argument("--model", default=os.environ.get("RPENT_MODEL"))
     parser.add_argument("--base-url")
     parser.add_argument("--allow-insecure-http", action="store_true")
@@ -305,8 +413,14 @@ def main(argv: list[str] | None = None) -> int:
             return 0
     if args.vla_backend != "joybrain" or args.env_endpoint or args.recording_config:
         parser.error("This runner owns recorded Joy-Brain evaluation workers")
-    if args.task_config != "demo_randomized":
-        parser.error("Batch evaluation uses the demo_randomized task manifest")
+    if args.api_image_limit is not None and args.api_image_limit < 1:
+        parser.error("--api-image-limit must be positive")
+    if args.task_config not in {"demo_clean", "demo_randomized"}:
+        parser.error("Batch evaluation supports demo_clean and demo_randomized")
+    if args.task_config == "demo_clean" and args.eval_manifest is None:
+        parser.error(
+            "demo_clean requires its own --eval-manifest; random seeds are not substituted"
+        )
     if (
         not 1 <= args.workers_per_gpu <= 8
         or args.max_turns < 1
@@ -365,9 +479,17 @@ def main(argv: list[str] | None = None) -> int:
             )
         if parsed.scheme == "http" and not args.allow_insecure_http:
             parser.error("Plain HTTP requires --allow-insecure-http")
-    manifest_path = Path(__file__).parent / "eval/demo_randomized.json"
+    manifest_path = (
+        Path(args.eval_manifest).expanduser().resolve()
+        if args.eval_manifest is not None
+        else Path(__file__).parent / "eval/demo_randomized.json"
+    )
+    manifest, manifest_sha256 = load_eval_manifest(manifest_path, args.task_config)
+    if args.eval_manifest is not None:
+        args.eval_manifest = manifest_path
+        manifest.setdefault("seed_source", "provided_manifest")
     cells = make_cells(
-        json.loads(manifest_path.read_text()),
+        manifest,
         args.task_name or args.tasks,
         args.episodes_per_task,
         args.seed,
@@ -382,6 +504,20 @@ def main(argv: list[str] | None = None) -> int:
     output.mkdir(parents=True, exist_ok=False)
     plan = {
         "kind": "robotwin_evaluation",
+        "episode_error_policy": args.episode_error_policy,
+        "api_image_history": {
+            "limit": args.api_image_limit,
+            "scope": "outbound user/tool images only; newest retained; raw artifacts unchanged",
+            "parent_limit": resume.plan.get("configuration", {}).get("api_image_limit")
+            if resume is not None
+            else None,
+            "change_acknowledged": args.allow_image_context_change_on_resume,
+        },
+        "seed_manifest": {
+            "path": str(manifest_path),
+            "sha256": manifest_sha256,
+            "task_config": args.task_config,
+        },
         "resume_from": str(resume.root) if resume is not None else None,
         "controller_source_changes": controller_changes,
         "rng_continuation": "new service RNG; previous actions are not replayed"
@@ -435,6 +571,8 @@ def main(argv: list[str] | None = None) -> int:
     sources = list(Path(__file__).parent.glob("*.py")) + list(
         (Path(__file__).parent / "prompts").glob("*.py")
     )
+    sources += list((get_repo_root() / "rpent/planner").glob("*.py"))
+    sources.append(get_repo_root() / "rpent/cli/main.py")
     plan["source_sha256"] = {
         str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in sources
     }
@@ -482,6 +620,7 @@ def main(argv: list[str] | None = None) -> int:
     save_results(output, summary, cells)
     environment = dict(os.environ)
     environment["PYTHONPATH"] = str(get_repo_root())
+    episode_stop = False
     last_check = 0.0
 
     def check_resources():
@@ -631,6 +770,8 @@ def main(argv: list[str] | None = None) -> int:
                     command += ["--vla-model-path", args.vla_model_path]
                 if base_url:
                     command += ["--base-url", base_url]
+                if args.api_image_limit is not None:
+                    command += ["--api-image-limit", str(args.api_image_limit)]
                 write_json(directory / "command.json", {"argv": command})
                 return JobLaunch(
                     command,
@@ -650,6 +791,7 @@ def main(argv: list[str] | None = None) -> int:
                 logger.info("START %s on %s", cell["job_id"], slot.slot_id)
 
             def finished(process):
+                nonlocal episode_stop
                 cell = by_id[process["job_id"]]
                 directory = output / cell["job_id"]
                 try:
@@ -673,6 +815,32 @@ def main(argv: list[str] | None = None) -> int:
                         "model_server_count": len(groups),
                     },
                 )
+                disposition = error_disposition(row, args.episode_error_policy)
+                if disposition is not None:
+                    row["exception_disposition"] = disposition
+                    errors = output / "episode_errors"
+                    errors.mkdir(exist_ok=True)
+                    write_json(
+                        errors / f"{cell['job_id']}.json",
+                        {
+                            "cell": cell,
+                            "directory": str(directory),
+                            "error": row.get("error"),
+                            "trace_error": row.get("trace_error"),
+                            **disposition,
+                        },
+                    )
+                    logger.warning(
+                        "%s %s: %s",
+                        disposition["action"],
+                        cell["job_id"],
+                        disposition["kind"],
+                    )
+                    if disposition["action"] == "drain_and_stop":
+                        episode_stop = True
+                        summary["stop_reason"] = (
+                            f"episode_exception:{disposition['kind']}"
+                        )
                 write_json(directory / "evaluation.json", row)
                 summary["episodes"].append(row)
                 summary["active"].pop(cell["job_id"], None)
@@ -683,7 +851,7 @@ def main(argv: list[str] | None = None) -> int:
 
             def stop_requested():
                 pool.check()
-                return (output / "STOP_AFTER_CURRENT").exists()
+                return episode_stop or (output / "STOP_AFTER_CURRENT").exists()
 
             summary["status"] = "running"
             save_results(output, summary, cells)

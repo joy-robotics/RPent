@@ -188,6 +188,7 @@ def build_planner(
     dashboard_events: DashboardEventSink,
     no_images: bool = False,
     interactive: bool = False,
+    max_history_images: int | None = None,
 ) -> Planner:
     """Build a planner for the given backend, resolving credentials from env vars."""
     # Imports are deferred to avoid a circular import: api_loop / claude_code /
@@ -208,6 +209,7 @@ def build_planner(
             no_images=no_images,
             timeout_s=api_timeout_s,
             interactive=interactive,
+            max_history_images=max_history_images,
         )
     if planner_type == "claude_code":
         from rpent.planner.claude_code import ClaudeCodePlanner

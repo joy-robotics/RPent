@@ -308,3 +308,19 @@ Reaching a turn limit stops the current loop; an interactive Claude session
 can still accept another query. The main program saves the transcript when
 the run ends. Timeouts or SDK exceptions are stored in the planner result
 and written to the log.
+
+API image-history budget
+------------------------
+
+For a provider with a per-request image limit, set ``--api-image-limit N`` with
+``--planner api``. The limit is opt-in and positive; for example, ``48`` leaves
+room below a provider limit of 50 images. Verify the actual provider's limit.
+Before each request, RPent replaces the oldest typed user/tool image inputs with
+an omission notice, keeping the newest images, text, and tool-call/result IDs.
+This does not delete or resize recorded images, videos, or native action traces.
+It is separate from ``--no-images``, which suppresses all image transmission.
+
+``stats.image_budget`` records the configured limit, affected requests, omitted
+image occurrences and maximum images sent. This changes the model's visible
+history: record the setting when comparing runs rather than treating capped and
+uncapped histories as identical evaluation conditions.

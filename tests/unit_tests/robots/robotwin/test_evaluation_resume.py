@@ -69,6 +69,24 @@ def test_resume_excludes_successes_and_failed_attempts(tmp_path):
     assert all(row["phase"]["workers_per_gpu"] == 4 for row in state.completed)
 
 
+def test_resume_rejects_modified_seed_manifest(tmp_path):
+    root = tmp_path / "parent"
+    plan, _ = parent_run(root)
+    manifest = root / "seeds.json"
+    manifest.write_text('{"task_config":"demo_clean"}')
+    plan["seed_manifest"] = {
+        "path": str(manifest),
+        "sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+    }
+    plan["configuration"]["eval_manifest"] = str(manifest)
+    (root / "plan.json").write_text(json.dumps(plan))
+    state = load_parent(root)
+    assert inherited_defaults(state)["eval_manifest"] == str(manifest)
+    manifest.write_text('{"task_config":"demo_randomized"}')
+    with pytest.raises(ValueError, match="Seed manifest changed"):
+        load_parent(root)
+
+
 def test_active_parent_is_not_resumed(tmp_path):
     root = tmp_path / "parent"
     _, summary = parent_run(root)
@@ -104,6 +122,39 @@ def test_policy_and_budget_cannot_change_on_resume(tmp_path):
     arguments.max_turns = 25
     with pytest.raises(ValueError, match="max_turns"):
         validate_configuration(state, arguments)
+
+
+def test_image_context_change_requires_explicit_acknowledgement(tmp_path):
+    root = tmp_path / "parent"
+    parent_run(root)
+    state = load_parent(root)
+    arguments = Namespace(**inherited_defaults(state))
+    arguments.api_image_limit = 48
+    with pytest.raises(ValueError, match="api_image_limit"):
+        validate_configuration(state, arguments)
+    arguments.allow_image_context_change_on_resume = True
+    validate_configuration(state, arguments)
+    arguments.max_turns = 2
+    with pytest.raises(ValueError, match="max_turns"):
+        validate_configuration(state, arguments)
+
+
+def test_resume_control_edits_do_not_relax_worker_hash_guard(tmp_path):
+    root = tmp_path / "parent"
+    plan, _ = parent_run(root)
+    controller = root / "evaluate.py"
+    resume_control = root / "evaluation_resume.py"
+    resume_control.write_text("original control\n")
+    plan["source_sha256"][str(resume_control)] = hashlib.sha256(
+        resume_control.read_bytes()
+    ).hexdigest()
+    (root / "plan.json").write_text(json.dumps(plan))
+    state = load_parent(root)
+    resume_control.write_text("updated control\n")
+    assert verify_worker_sources(state, controller) == [str(resume_control)]
+    (root / "worker.py").write_text("changed worker\n")
+    with pytest.raises(ValueError, match="Worker/model/recorder source changed"):
+        verify_worker_sources(state, controller)
 
 
 def test_only_controller_source_change_is_allowed(tmp_path):

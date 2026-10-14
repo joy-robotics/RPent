@@ -325,3 +325,45 @@ RoboTwin assets and LingBot-VLA checkpoint as described earlier on this page.
 An episode counts as successful only if the final value of
 ``TASK_ENV.eval_success`` is ``true``; the planner's ``finish`` call does not by
 itself indicate success.
+
+Recorded Joy-Brain batch evaluation
+----------------------------------
+
+``python -m robots.robotwin.evaluate`` records independent Agent episodes and
+supports ``demo_clean`` and ``demo_randomized``. Without ``--eval-manifest``, only
+the bundled ``demo_randomized`` seed table is used. Clean evaluation requires an
+explicit clean seed manifest; random seeds are never silently substituted.
+
+A manifest contains ``task_config`` and a ``tasks`` mapping, for example
+``{"task_config": "demo_clean", "tasks": {"click_bell": [{"seed": 100000}]}}``.
+This is a schema example, not a claim that this seed has been expert-verified.
+An optional ``seed_source`` describes provenance; external manifests default to
+``provided_manifest``. Select seeds independently of the VLA/Agent result.
+
+Use ``--tasks all --episodes-per-task 5 --task-config demo_clean
+--eval-manifest /path/to/clean-seeds.json`` with the desired GPU, model, budget,
+and output arguments. Run randomized evaluation separately with its own manifest
+and a different output directory. Review ``--dry-run`` plans first. The plan
+records the manifest path and SHA-256; resume rejects changed manifest bytes.
+
+With action recording, each episode retains the planner transcript, tool/state
+records, video, native action trace with aligned camera observations, policy
+metadata, native success verdict and failure details. Failed attempts are not
+silently replaced. ``STOP_AFTER_CURRENT`` stops dispatch and drains active workers;
+``--resume-from`` resumes only unattempted cells of a normally drained batch.
+Hard-interrupted or uncertain attempts require inspection before further work.
+
+``--episode-error-policy continue`` (the default) preserves episode errors in
+``episode_errors/``, retires that attempt and dispatches the next unattempted
+cell. It does not retry uncertain native actions or accept a substituted seed.
+``stop`` instead drains the batch after an episode exception. GPU-memory and
+storage failures always stop dispatch; shared-service and resource guards remain
+active under either policy. A normal native task failure is not an infrastructure
+exception, and exception handling does not rewrite the native success verdict.
+
+Use ``--api-image-limit 48`` when this is appropriate for the configured API's
+image ceiling. Changing that limit while resuming requires the explicit
+``--allow-image-context-change-on-resume`` acknowledgement. The plan records the
+old/new values and code fingerprints; other frozen model, seed, strategy and
+budget settings remain protected. Old failed attempts remain in the result and
+are not silently replaced by another run.

@@ -8,6 +8,159 @@ from robots.robotwin import evaluate
 from robots.robotwin.rollout_pool import GPU
 
 
+@pytest.mark.parametrize(
+    "row,kind",
+    [
+        (
+            {"trace_error": "missing transition", "stop_reason": "planner_stop"},
+            "recording_error",
+        ),
+        (
+            {
+                "error": "invalid scene seed",
+                "stop_reason": "initialization_or_worker_error",
+            },
+            "initialization_or_worker_error",
+        ),
+        ({"error": "model HTTP 500", "stop_reason": "planner_error"}, "planner_error"),
+        ({"error": "timed out", "stop_reason": "planner_timeout"}, "planner_timeout"),
+    ],
+)
+def test_episode_errors_are_explicitly_skipped_without_replay(row, kind):
+    disposition = evaluate.error_disposition(row, "continue")
+    assert disposition == {
+        "kind": kind,
+        "action": "skip_and_continue",
+        "replay": False,
+        "artifacts_preserved": True,
+    }
+    assert evaluate.error_disposition(row, "stop")["action"] == "drain_and_stop"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "CUDA out of memory",
+        "OutOfMemoryError",
+        "No space left on device",
+        "Disk quota exceeded",
+    ],
+)
+def test_resource_failures_cannot_be_skipped(message):
+    assert (
+        evaluate.error_disposition({"error": message}, "continue")["action"]
+        == "drain_and_stop"
+    )
+
+
+def test_native_task_failure_is_not_an_exception():
+    assert (
+        evaluate.error_disposition(
+            {"official_success": False, "stop_reason": "planner_stop", "error": None},
+            "continue",
+        )
+        is None
+    )
+
+
+def test_clean_requires_its_own_manifest_before_gpu_work(tmp_path):
+    with pytest.raises(SystemExit):
+        evaluate.main(
+            [
+                "--task-config",
+                "demo_clean",
+                "--dry-run",
+                "--output-dir",
+                str(tmp_path / "run"),
+            ]
+        )
+    assert not (tmp_path / "run").exists()
+
+
+@pytest.mark.parametrize("track", ["demo_clean", "demo_randomized"])
+def test_explicit_track_manifest_preserves_seeds_and_provenance(
+    tmp_path, monkeypatch, track
+):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.setattr(
+        evaluate, "discover_gpus", lambda: [GPU(0, "GPU-cpu", 160000, 150000)]
+    )
+    monkeypatch.setattr(
+        evaluate.subprocess,
+        "Popen",
+        lambda *args, **kwargs: pytest.fail("dry-run launched a service"),
+    )
+    manifest = tmp_path / "seeds.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "task_config": track,
+                "seed_source": "upstream_expert_validated_run",
+                "tasks": {"click_bell": [{"seed": 4300001}, {"seed": 4300004}]},
+            }
+        )
+    )
+    output = tmp_path / "run"
+    assert (
+        evaluate.main(
+            [
+                "--task-config",
+                track,
+                "--eval-manifest",
+                str(manifest),
+                "--episodes-per-task",
+                "2",
+                "--dry-run",
+                "--output-dir",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    plan = json.loads((output / "plan.json").read_text())
+    assert [cell["seed"] for cell in plan["cells"]] == [4300001, 4300004]
+    assert {cell["seed_source"] for cell in plan["cells"]} == {
+        "upstream_expert_validated_run"
+    }
+    assert plan["seed_manifest"]["task_config"] == track
+    assert plan["configuration"]["eval_manifest"] == str(manifest)
+    assert len(plan["seed_manifest"]["sha256"]) == 64
+
+
+@pytest.mark.parametrize("seeds", [[1, 1], [-1], [True], ["100000"]])
+def test_seed_manifest_rejects_invalid_entries(tmp_path, seeds):
+    path = tmp_path / "seeds.json"
+    path.write_text(
+        json.dumps(
+            {
+                "task_config": "demo_clean",
+                "tasks": {"task": [{"seed": value} for value in seeds]},
+            }
+        )
+    )
+    with pytest.raises(ValueError):
+        evaluate.load_eval_manifest(path, "demo_clean")
+
+
+def test_seed_manifest_cannot_be_used_for_another_track(tmp_path):
+    path = tmp_path / "seeds.json"
+    path.write_text(
+        json.dumps(
+            {"task_config": "demo_randomized", "tasks": {"task": [{"seed": 100000}]}}
+        )
+    )
+    with pytest.raises(ValueError, match="task_config"):
+        evaluate.load_eval_manifest(path, "demo_clean")
+
+
+@pytest.mark.parametrize("value", [[], "not a manifest", None])
+def test_seed_manifest_requires_an_object(tmp_path, value):
+    path = tmp_path / "seeds.json"
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="JSON object"):
+        evaluate.load_eval_manifest(path, "demo_clean")
+
+
 def test_500_jobs_have_ten_unique_seeds_per_task():
     manifest = json.loads(
         (Path(evaluate.__file__).parent / "eval/demo_randomized.json").read_text()
@@ -299,8 +452,9 @@ def test_recording_requires_owned_joybrain_evaluation():
         robot_spec._parse_config(args)
 
 
+@pytest.mark.parametrize("image_limit", [None, 48])
 def test_controller_builds_native_cli_workers_without_legacy_wrapper(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, image_limit
 ):
     from types import SimpleNamespace
 
@@ -374,6 +528,7 @@ def test_controller_builds_native_cli_workers_without_legacy_wrapper(
         parser = _build_argparser()
         robot_spec._add_cli_args(parser, False)
         native_args = parser.parse_args(launch.command[3:])
+        assert native_args.api_image_limit == image_limit
         config = robot_spec._parse_config(native_args)
         assert config.task_desc["record_actions"] is True
         metadata = json.loads(native_args.recording_config.read_text())
@@ -395,6 +550,11 @@ def test_controller_builds_native_cli_workers_without_legacy_wrapper(
                 "2048",
                 "--output-dir",
                 str(output),
+                *(
+                    ["--api-image-limit", str(image_limit)]
+                    if image_limit is not None
+                    else []
+                ),
             ]
         )
         == 0

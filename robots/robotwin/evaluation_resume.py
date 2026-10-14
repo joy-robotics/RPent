@@ -15,6 +15,7 @@ SEMANTIC_ARGUMENTS = (
     "task_config",
     "tasks",
     "episodes_per_task",
+    "eval_manifest",
     "record_actions",
     "vla_backend",
     "vla_model_path",
@@ -32,6 +33,7 @@ SEMANTIC_ARGUMENTS = (
     "max_tokens",
     "planner_timeout_s",
     "max_episode_steps",
+    "api_image_limit",
 )
 
 
@@ -50,6 +52,13 @@ def load_parent(root: Path) -> ResumeState:
     """Require a fully drained parent and a persisted result for every attempt."""
     root = root.expanduser().resolve()
     plan = json.loads((root / "plan.json").read_text())
+    manifest = plan.get("seed_manifest")
+    if (
+        manifest is not None
+        and hashlib.sha256(Path(manifest["path"]).read_bytes()).hexdigest()
+        != manifest["sha256"]
+    ):
+        raise ValueError("Seed manifest changed since the parent evaluation")
     summary = json.loads((root / "summary.json").read_text())
     if (
         summary.get("status") not in {"complete", "stopped_by_request"}
@@ -123,6 +132,7 @@ def inherited_defaults(state: ResumeState) -> dict[str, Any]:
     defaults["gpu_ids"] = configuration.get("gpu_ids", "0")
     defaults["gpu_layout"] = configuration.get("gpu_layout", "colocated")
     defaults["_vla_model_path_explicit"] = defaults.get("vla_model_path") is not None
+    defaults.setdefault("api_image_limit", None)
     return defaults
 
 
@@ -134,20 +144,28 @@ def validate_configuration(state: ResumeState, arguments: Any) -> None:
             actual = getattr(arguments, name)
             actual = str(actual) if isinstance(actual, Path) else actual
             if actual != expected[name]:
+                if name == "api_image_limit" and getattr(
+                    arguments, "allow_image_context_change_on_resume", False
+                ):
+                    continue
                 raise ValueError(f"Resume cannot change frozen setting {name}")
 
 
 def verify_worker_sources(state: ResumeState, controller: Path) -> list[str]:
-    """Only the scheduling controller may change during this resume migration."""
+    """Allow audited scheduler/resume edits, never worker, planner or model edits."""
     hashes = state.plan.get("source_sha256")
     if not hashes:
         raise ValueError("Parent evaluation has no frozen source hashes")
     changed = []
+    control_sources = {
+        controller.resolve(),
+        controller.with_name("evaluation_resume.py").resolve(),
+    }
     for filename, expected in hashes.items():
         path = Path(filename)
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
         if actual != expected:
-            if path.resolve() != controller.resolve():
+            if path.resolve() not in control_sources:
                 raise ValueError(f"Worker/model/recorder source changed: {filename}")
             changed.append(filename)
     return changed

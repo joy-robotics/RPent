@@ -66,6 +66,7 @@ from rpent.dashboard.events import DashboardEventSink, TranscriptEvent, UsageEve
 from rpent.dashboard.interaction import DashboardInteractionPort, DashboardMessage
 from rpent.dashboard.planner_control import DashboardPlannerControl
 from rpent.planner.base import REASONING_EFFORTS, Planner, PlannerResult
+from rpent.planner.image_budget import RequestImageBudget
 from rpent.tools.toolkit import Toolkit, ToolResult
 from rpent.utils.logging import get_logger
 
@@ -89,6 +90,7 @@ class ApiAgentLoop(Planner):
         no_images: bool = False,
         timeout_s: float = 1200,
         interactive: bool = False,
+        max_history_images: int | None = None,
     ) -> None:
         if reasoning_effort not in REASONING_EFFORTS:
             raise ValueError(f"unsupported reasoning effort: {reasoning_effort}")
@@ -101,6 +103,11 @@ class ApiAgentLoop(Planner):
         self.no_images = no_images
         self.timeout_s = timeout_s
         self.interactive = interactive
+        if max_history_images is not None and (
+            type(max_history_images) is not int or max_history_images < 1
+        ):
+            raise ValueError("max_history_images must be a positive integer or None")
+        self.max_history_images = max_history_images
 
     def solve(
         self,
@@ -144,6 +151,11 @@ class ApiAgentLoop(Planner):
         session = _Session(
             adapter, conversation_id, max_turns, interactive=self.interactive
         )
+        image_budget = (
+            RequestImageBudget(self.max_history_images)
+            if self.max_history_images is not None
+            else None
+        )
         agent = Agent(
             self.model,
             name="rpent_api",
@@ -163,6 +175,7 @@ class ApiAgentLoop(Planner):
                     False if self.reasoning_effort == "none" else self.reasoning_effort
                 ),
                 session,
+                *([image_budget] if image_budget is not None else []),
             ],
         )
         if interaction is not None:
@@ -198,6 +211,11 @@ class ApiAgentLoop(Planner):
                 "total_cached_input_tokens": session.usage.cache_read_tokens,
                 "turns_used": session.usage.requests,
                 "tool_calls": adapter.tool_calls,
+                **(
+                    {"image_budget": image_budget.stats()}
+                    if image_budget is not None
+                    else {}
+                ),
             },
             error=session.error,
         )

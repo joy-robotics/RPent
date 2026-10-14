@@ -291,6 +291,7 @@ def _run_dashboard_task(
                         claude_code_max_budget_usd=args.claude_code_max_budget_usd,
                         dashboard_events=state,
                         no_images=args.no_images,
+                        max_history_images=getattr(args, "api_image_limit", None),
                     )
                     result = planner.solve(
                         system_prompt=system_prompt,
