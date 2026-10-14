@@ -34,12 +34,14 @@ EXPECTED_ROBOTS = (
     "franka",
     "libero",
     "robocasa",
+    "robocasa_gr1",
     "robodojo",
     "robotwin",
     "yam",
 )
 
 PROMPT_VARIABLES = {
+    "robocasa_gr1": {"task_name": "PnPCupToDrawerClose", "seed": 7},
     "yam": {
         "task_name": "tabletop_cleanup_a",
         "seed": 0,

@@ -104,6 +104,26 @@ bash tests/e2e_tests/run_gpu_suite.sh \
   /path/to/new-venv-root
 ```
 
+## RoboCasa GR1 bounded acceptance
+
+The independent `robocasa_gr1` backend reuses an existing native GR1 simulator
+environment and Joy-Brain model environment. Configure their paths as documented
+in the [GR1 guide](../docs/source-en/rst_source/simulators/robocasa_gr1.rst), then
+run on an allocated compute GPU with a new output directory:
+
+```bash
+python -m tests.e2e_tests.robocasa_gr1.smoke \
+  --task-name PnPCupToDrawerClose --seed 7 --cuda-device 0 \
+  --max-episode-steps 17 --output-dir logs/gr1-components
+```
+
+This opt-in entry point is not a `run_gpu_suite.sh` target. It checks native
+reset/RGB, inference-only, a native joint hold and a bounded VLA action window,
+with phase timings, sampled device memory, action traces and video. No Agent API
+is called. Use the normal `--robot robocasa_gr1 --planner api` CLI separately for
+a real Agent evaluation after authorizing data transmission. Native success and
+component acceptance are separate outcomes.
+
 ## Dual-Franka VLA diagnostic console
 
 Run the real-robot diagnostic explicitly from a source checkout after installing

@@ -29,6 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 ROBOT_HELP_CASES = [
     ("libero", ("--suite", "--task", "--libero-type")),
     ("robocasa", ("--task-name", "--split", "--hi-res")),
+    ("robocasa_gr1", ("--task-name", "--gr1-python", "--replan-steps")),
     ("robotwin", ("--task-name", "--task-config", "--robotwin-assets-path")),
 ]
 

@@ -14,6 +14,8 @@ Choose a platform for installation and usage instructions.
      - Tabletop manipulation with LIBERO, LIBERO-PRO, and LIBERO-plus.
    * - :doc:`robocasa`
      - Kitchen manipulation with RoboCasa365 and Target50 experiments.
+   * - :doc:`robocasa_gr1`
+     - Native GR1 tabletop tasks with the original Joy-Brain VLA backend.
    * - :doc:`robotwin`
      - Bimanual manipulation and RoboTwin C2R experiments.
    * - :doc:`robodojo`

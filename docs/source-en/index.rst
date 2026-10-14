@@ -105,6 +105,7 @@ Choose an environment: :doc:`LIBERO <rst_source/simulators/libero>`, :doc:`RoboC
 
    LIBERO <rst_source/simulators/libero>
    RoboCasa365 <rst_source/simulators/robocasa>
+   RoboCasa GR1 <rst_source/simulators/robocasa_gr1>
    RoboTwin <rst_source/simulators/robotwin>
    RoboDojo <rst_source/simulators/robodojo>
 

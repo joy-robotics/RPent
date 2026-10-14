@@ -14,6 +14,8 @@
      - 桌面操作；LIBERO、LIBERO-PRO 与 LIBERO-plus。
    * - :doc:`robocasa`
      - 厨房操作；RoboCasa365 与 Target50 实验。
+   * - :doc:`robocasa_gr1`
+     - 原生 GR1 桌面任务与原始 Joy-Brain VLA 后端。
    * - :doc:`robotwin`
      - 双臂操作；RoboTwin C2R 实验。
    * - :doc:`robodojo`

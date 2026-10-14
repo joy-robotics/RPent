@@ -73,6 +73,11 @@ joybrain = [
     "msgpack>=1,<2",
     "websockets>=15,<17",
 ]
+robocasa-gr1 = [
+    "rpent[joybrain]",
+    "pillow>=10",
+    "imageio[ffmpeg]",
+]
 sam3 = [
     "sam3 @ git+https://github.com/RLinf/sam3.git@main",
     "einops>=0.8.0",
