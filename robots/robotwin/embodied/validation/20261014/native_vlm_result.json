@@ -1,0 +1,80 @@
+{
+  "real_vlm": true,
+  "real_planner": false,
+  "passed": true,
+  "repo": "/mnt/workspace/users/linxiao/code/.RPent_remote_20261013",
+  "gpu_index": 1,
+  "command": [
+    "/mnt/workspace/users/linxiao/code/RPent-JoyBrain/.cache/host_runtime/policy/bin/python",
+    "-m",
+    "robots.robotwin.embodied.server",
+    "--checkpoint",
+    "/mnt/workspace1/share/ckpt/qwen35_9b_midv5_sftv7_joybrain_rl_082120_sftv7_1M_v3_nothinking_n8_globalbatch1280_minibatch640_40gpu",
+    "--port",
+    "64989"
+  ],
+  "suite_returncode": 0,
+  "cases": [
+    {
+      "task": "grounding_2d",
+      "case": "grounding_2d",
+      "passed": true,
+      "error": null
+    },
+    {
+      "task": "affordance_2d",
+      "case": "affordance_2d",
+      "passed": true,
+      "error": null
+    },
+    {
+      "task": "pointing_2d",
+      "case": "pointing_2d",
+      "passed": true,
+      "error": null
+    },
+    {
+      "task": "trace_2d",
+      "case": "trace_2d",
+      "passed": true,
+      "error": null
+    },
+    {
+      "task": "trace_3d",
+      "case": "trace_3d",
+      "passed": true,
+      "error": null
+    },
+    {
+      "task": "grounding_3d",
+      "case": "grounding_3d",
+      "passed": true,
+      "error": null
+    },
+    {
+      "task": "video_grounding_3d",
+      "case": "video_grounding_3d",
+      "passed": true,
+      "error": null
+    },
+    {
+      "task": "depth_estimation",
+      "case": "depth_estimation_object",
+      "passed": true,
+      "error": null
+    },
+    {
+      "task": "depth_estimation",
+      "case": "depth_estimation_marker",
+      "passed": true,
+      "error": null
+    },
+    {
+      "task": "depth_estimation",
+      "case": "depth_estimation_point",
+      "passed": true,
+      "error": null
+    }
+  ],
+  "server_returncode_after_cleanup": -15
+}

@@ -20,7 +20,7 @@ from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from robots.robotwin import robot_spec
+from robots.robotwin import robot_spec, tool_plugin
 from robots.robotwin.policy_pool import PolicyPool
 from robots.robotwin.recording import validate_trace, write_json
 from robots.robotwin.rollout_pool import (
@@ -156,14 +156,28 @@ def inspect_episode(directory: Path, process: dict) -> dict:
         if native.get("truncated")
         else "planner_stop"
     )
+    perception_error = None
+    try:
+        perception = tool_plugin.read_usage(directory)
+    except Exception as exc:
+        perception = {
+            "calls": {},
+            "successes": {},
+            "failures": {},
+            "incomplete": 0,
+            "elapsed_s": 0.0,
+        }
+        perception_error = f"{type(exc).__name__}: {exc}"
     return {
         "official_success": success,
-        "loop_verified": verified,
+        "loop_verified": verified and not perception_error,
         "error": error,
         "trace_error": trace_error,
         "trace_validation": trace,
         "stop_reason": reason,
         "tool_calls": dict(Counter(item["tool"] for item in sequence)),
+        "perception_tool_usage": perception,
+        "perception_tool_error": perception_error,
         "tool_sequence": sequence,
         "planner_stats": final.get("stats", {}),
         "elapsed_s": final.get("elapsed_s"),
@@ -208,10 +222,38 @@ def save_results(output: Path, summary: dict, cells: list[dict]) -> None:
                     sum(
                         value
                         for name, value in row["tool_calls"].items()
-                        if name != "lingbot_act"
+                        if name in {"move_to", "release", "set_gripper", "rotate_wrist"}
                     )
                     for row in results
                 ),
+                "executed_actions": sum(
+                    row.get("trace_validation", {}).get("executed_actions", 0)
+                    for row in results
+                ),
+                "episodes_with_action_counts": sum(
+                    "executed_actions" in row.get("trace_validation", {})
+                    for row in results
+                ),
+                "loop_seconds": sum(row.get("elapsed_s") or 0.0 for row in results),
+                "episodes_with_loop_time": sum(
+                    row.get("elapsed_s") is not None for row in results
+                ),
+                "worker_wall_seconds": sum(
+                    row.get("scheduler", {}).get("wall_s") or 0.0 for row in results
+                ),
+                "perception_calls": sum(
+                    sum(row.get("perception_tool_usage", {}).get("calls", {}).values())
+                    for row in results
+                ),
+                **{
+                    f"{name}_calls": sum(
+                        row.get("perception_tool_usage", {})
+                        .get("calls", {})
+                        .get(name, 0)
+                        for row in results
+                    )
+                    for name in summary.get("perception_tools", [])
+                },
             }
         )
     write_json(output / "task_summary.json", {"tasks": rows})
@@ -297,6 +339,8 @@ def main(argv: list[str] | None = None) -> int:
         resume = load_parent(preview.resume_from)
         parser.set_defaults(**inherited_defaults(resume))
     args = parser.parse_args(argv)
+    plugin_options = tool_plugin.configuration(args)
+    plugin = tool_plugin.load_plugin(plugin_options) if plugin_options else None
     if resume is not None:
         validate_configuration(resume, args)
         controller_changes = verify_worker_sources(resume, Path(__file__))
@@ -435,6 +479,9 @@ def main(argv: list[str] | None = None) -> int:
     sources = list(Path(__file__).parent.glob("*.py")) + list(
         (Path(__file__).parent / "prompts").glob("*.py")
     )
+    if plugin is not None:
+        sources.extend(Path(path).resolve() for path in plugin.source_files())
+        plan["perception_tools"] = list(plugin.tool_names())
     plan["source_sha256"] = {
         str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in sources
     }
@@ -478,6 +525,7 @@ def main(argv: list[str] | None = None) -> int:
         "worker_capacity": capacity,
         "workers_per_gpu": args.workers_per_gpu,
         "training_eligible": False,
+        "perception_tools": list(plugin.tool_names()) if plugin is not None else [],
     }
     save_results(output, summary, cells)
     environment = dict(os.environ)
@@ -631,6 +679,8 @@ def main(argv: list[str] | None = None) -> int:
                     command += ["--vla-model-path", args.vla_model_path]
                 if base_url:
                     command += ["--base-url", base_url]
+                if plugin_options:
+                    command += tool_plugin.worker_arguments(plugin_options)
                 write_json(directory / "command.json", {"argv": command})
                 return JobLaunch(
                     command,

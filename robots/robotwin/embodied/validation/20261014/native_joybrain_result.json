@@ -1,0 +1,83 @@
+{
+  "kind": "in_tree_backend_integration_no_llm",
+  "real_planner": false,
+  "passed": true,
+  "client_module": "robots.robotwin.joybrain_client",
+  "policy_metadata": {
+    "policy_type": "joybrain_vla_mot",
+    "ckpt_path": "/mnt/workspace/users/yaoxu/Joy-Brain-vla/outputs/joybrain_vla/mot-robotwin-stage1_100k_bs16_60k/checkpoints/060000/pretrained_model",
+    "embodiment_id": "robotwin_aloha",
+    "stats_key": "robotwin_aloha",
+    "robot_type": "aloha",
+    "state_dim": 14,
+    "expected_state_dim": 14,
+    "action_dim": 14,
+    "chunk_size": 16,
+    "protocol_version": "2.1",
+    "returns": "actions",
+    "expected_num_input_images": 3,
+    "preprocessing_owner": "server_canonical",
+    "strict_input_validation": true,
+    "action_contract": null,
+    "state_layout": "qpos14",
+    "action_layout": "qpos14",
+    "camera_order": [
+      "head",
+      "left_wrist",
+      "right_wrist"
+    ]
+  },
+  "instruction": "Grab container using the smooth gray bowl, transfer it to the food plate.",
+  "initial_status": {
+    "eval_success": false,
+    "take_action_cnt": 0,
+    "step_lim": 10000,
+    "actual_seed": 100000
+  },
+  "atomic": {
+    "action_type": "qpos",
+    "requested_actions": 2,
+    "executed_actions": 2,
+    "episode_status": {
+      "eval_success": false,
+      "take_action_cnt": 2,
+      "step_lim": 10000,
+      "actual_seed": 100000
+    },
+    "completed": true,
+    "requested_steps": 2,
+    "executed_steps": 2,
+    "stop_reason": "completed",
+    "success": true,
+    "gripper_val": 1.0
+  },
+  "vla": {
+    "completed": true,
+    "requested_steps": 50,
+    "executed_steps": 50,
+    "stop_reason": "completed",
+    "success": true,
+    "prompt": "Grab container using the smooth gray bowl, transfer it to the food plate.",
+    "agent_prompt_ignored": true,
+    "ignored_agent_prompt": "ignored input, not a rewritten policy task",
+    "episode_status": {
+      "eval_success": false,
+      "take_action_cnt": 52,
+      "step_lim": 10000,
+      "actual_seed": 100000
+    },
+    "vla_backend": "joybrain",
+    "action_layout": "qpos14",
+    "vla_inferences": 4,
+    "policy_chunk_size": 16,
+    "tool_window": 50
+  },
+  "final_status": {
+    "eval_success": false,
+    "take_action_cnt": 52,
+    "step_lim": 10000,
+    "actual_seed": 100000
+  },
+  "external_adapter_imported": false,
+  "elapsed_s": 157.55595235805959
+}

@@ -59,6 +59,17 @@ Documentation = "https://rpent.readthedocs.io/en/latest/"
 "Bug Report" = "https://github.com/RLinf/RPent/issues"
 
 [project.optional-dependencies]
+embodied-tools = [
+    "pillow>=10",
+    "websockets>=15,<17",
+    "msgpack>=1",
+]
+embodied-vlm = [
+    "rpent[embodied-tools]",
+    "transformers>=5.2,<6",
+    "torch",
+    "torchvision",
+]
 test = [
     "coverage",
     "pytest",
@@ -264,6 +275,12 @@ unfixable = []
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"robots/robotwin/embodied/**/*.py" = ["CPY001"]
+"robots/robotwin/tool_plugin.py" = ["CPY001"]
+"tests/unit_tests/robots/robotwin/embodied/**/*.py" = ["CPY001"]
+"tests/unit_tests/robots/robotwin/test_tool_plugin.py" = ["CPY001"]
 
 [tool.ruff.format]
 quote-style = "double"

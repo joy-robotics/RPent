@@ -32,6 +32,11 @@ SEMANTIC_ARGUMENTS = (
     "max_tokens",
     "planner_timeout_s",
     "max_episode_steps",
+    "tool_plugin",
+    "tool_plugin_root",
+    "tool_plugin_endpoint",
+    "tool_plugin_checkpoint",
+    "tool_plugin_timeout",
 )
 
 

@@ -210,6 +210,12 @@ rpent --robot libero --dashboard --dashboard-language zh-cn \
 客户端、模型启动和 qpos 适配已直接集成到本仓库，不依赖外部适配器注册；
 参见 [接入说明](robots/robotwin/JOYBRAIN.md)。
 
+## 可选 Embodied 感知工具（RoboTwin）
+
+八种只读 VLM 工具可与原生 Joy-Brain 或 LingBot toolkit 共存；定义、推理服务与测评接入均在本仓库维护。
+使用方式见 [Embodied Tools 指南](robots/robotwin/embodied/README.zh-CN.md)。
+默认关闭，不替换 VLA 或原子动作。
+
 ## 参与贡献
 
 欢迎社区贡献。开发环境、必需检查、测试规范和集成检查清单请参见

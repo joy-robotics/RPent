@@ -39,6 +39,11 @@ def system_prompt(
         }
     if (variables or {}).get("strategy") == "atomic-preferred":
         sections["ATOMIC PREFERENCE"] = evaluate_parts.ATOMIC_PREFERRED
+    options = (variables or {}).get("tool_plugin")
+    if options:
+        from robots.robotwin.tool_plugin import load_plugin
+
+        sections["READ-ONLY PERCEPTION TOOLS"] = load_plugin(options).planner_prompt()
     return sections
 
 

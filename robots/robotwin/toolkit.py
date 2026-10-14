@@ -321,10 +321,16 @@ class RoboTwinToolkit(Toolkit):
             if frames:
                 self._state.save("episode.mp4", frames, step=None, fps=20)
         finally:
-            model = getattr(self._primitives, "model", None)
-            close = getattr(model, "close", None)
-            if getattr(model, "close_on_toolkit_close", False) and callable(close):
-                close()
+            try:
+                plugin = getattr(self, "_tool_plugin_runtime", None)
+                self._tool_plugin_runtime = None
+                if plugin is not None:
+                    plugin.close()
+            finally:
+                model = getattr(self._primitives, "model", None)
+                close = getattr(model, "close", None)
+                if getattr(model, "close_on_toolkit_close", False) and callable(close):
+                    close()
 
     def solved(self) -> bool:
         """Return the native RoboTwin task success flag."""

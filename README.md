@@ -209,6 +209,13 @@ RoboTwin can use `--vla-backend joybrain` while keeping the original LingBot def
 The client, policy launcher and qpos adaptation are implemented in this repository;
 see [the Joy-Brain integration guide](robots/robotwin/JOYBRAIN.md).
 
+## Optional embodied perception tools (RoboTwin)
+
+Eight read-only VLM tools can be enabled alongside the native Joy-Brain or
+LingBot toolkit. Definitions, inference service and evaluation integration live
+in this repository; see [the embodied tools guide](robots/robotwin/embodied/README.md).
+They are disabled by default and do not replace VLA or atomic actions.
+
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the

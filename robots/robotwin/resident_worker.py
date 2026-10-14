@@ -12,7 +12,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Any
 
-from robots.robotwin import robot_spec
+from robots.robotwin import robot_spec, tool_plugin
 from robots.robotwin.recording import write_json
 from robots.robotwin.resident_protocol import EpisodeRpcClient
 from robots.robotwin.runtime_cache import cache_environment
@@ -201,6 +201,7 @@ def run_worker(plan: dict, shard: dict, root: Path, endpoint: str) -> int:
     from rpent.cli.main import main as cli_main
 
     configuration = plan["configuration"]
+    plugin_options = tool_plugin.configuration(argparse.Namespace(**configuration))
     runtime = ResidentRuntime(
         root,
         Path(configuration["runtime_cache_dir"]) / shard["gpu"]["uuid"],
@@ -273,6 +274,8 @@ def run_worker(plan: dict, shard: dict, root: Path, endpoint: str) -> int:
             ]
             if configuration.get("base_url"):
                 arguments += ["--base-url", configuration["base_url"]]
+            if plugin_options:
+                arguments += tool_plugin.worker_arguments(plugin_options)
             write_json(directory / "command.json", {"argv": arguments})
             started = time.time_ns()
             reset_output_logging()

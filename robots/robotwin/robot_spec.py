@@ -216,7 +216,7 @@ def get_toolkit(
         memory_access="inbox_write" if mode == "exploration" else "read_only",
         inbox_cell_tag=config.recipe_tag if mode == "exploration" else None,
     )
-    return RoboTwinToolkit(
+    toolkit = RoboTwinToolkit(
         runtime_kwargs=runtime_kwargs,
         dashboard_events=dashboard_events,
         memory=memory,
@@ -224,6 +224,18 @@ def get_toolkit(
         attempts_per_session=attempts_per_session,
         state_output_dir=state_output_dir,
     )
+    options = config.prompt_vars.get("tool_plugin")
+    if options:
+        from robots.robotwin.tool_plugin import ToolPluginRuntime
+
+        try:
+            toolkit._tool_plugin_runtime = ToolPluginRuntime(
+                toolkit, options, Path(state_output_dir or config.output_dir)
+            )
+        except BaseException:
+            toolkit.close()
+            raise
+    return toolkit
 
 
 class _ModelPathAction(argparse.Action):
@@ -243,6 +255,9 @@ class _BackendAction(argparse.Action):
 
 
 def _add_cli_args(parser: argparse.ArgumentParser, use_dashboard: bool) -> None:
+    from robots.robotwin.tool_plugin import add_cli_args
+
+    add_cli_args(parser)
     required = not use_dashboard
     parser.add_argument("--task-name", required=required)
     parser.add_argument(
@@ -365,6 +380,9 @@ def _add_cli_args(parser: argparse.ArgumentParser, use_dashboard: bool) -> None:
 
 
 def _parse_config(args: argparse.Namespace) -> RunConfig:
+    from robots.robotwin.tool_plugin import configuration
+
+    plugin_options = configuration(args)
     if not args.task_name:
         raise ValueError("--task-name is required")
     env_cuda_device, vla_cuda_device = _resolve_cuda_devices(args)
@@ -403,6 +421,7 @@ def _parse_config(args: argparse.Namespace) -> RunConfig:
         else f"{args.task_name}_s0"
     )
     prompt_vars = {
+        **({"tool_plugin": plugin_options} if plugin_options else {}),
         "strategy": getattr(args, "strategy", "upstream"),
         "vla_backend": "joybrain" if joybrain else "lingbot",
         "vla_checkpoint": model_path or "external JoyBrain endpoint",
@@ -432,6 +451,7 @@ def _parse_config(args: argparse.Namespace) -> RunConfig:
         output_dir=output_dir,
         prompt_vars=prompt_vars,
         task_desc={
+            **({"tool_plugin": plugin_options} if plugin_options else {}),
             "env": "robotwin",
             "record_actions": getattr(args, "record_actions", False),
             "strategy": getattr(args, "strategy", "upstream"),

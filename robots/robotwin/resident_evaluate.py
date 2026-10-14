@@ -17,7 +17,7 @@ from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from robots.robotwin import robot_spec
+from robots.robotwin import robot_spec, tool_plugin
 from robots.robotwin.evaluate import make_cells, require_gpu_headroom
 from robots.robotwin.policy_pool import PolicyPool
 from robots.robotwin.recording import write_json
@@ -60,6 +60,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    plugin_options = tool_plugin.configuration(args)
+    plugin = tool_plugin.load_plugin(plugin_options) if plugin_options else None
     task = args.task_name or args.tasks
     if task == "all" or "," in task or args.task_config != "demo_randomized":
         parser.error("Resident evaluation currently supports one demo_randomized task")
@@ -146,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
         "training_eligible": False,
         "worker_lifecycle": "resident Agent and Env processes; fresh CLI conversation/recorder per episode",
         "scene_lifecycle": "native task/language prewalk refreshed for each seed; no task switching",
+        "perception_tools": list(plugin.tool_names()) if plugin is not None else [],
         "configuration": {
             name: str(value) if isinstance(value, Path) else value
             for name, value in vars(args).items()
@@ -167,6 +170,8 @@ def main(argv: list[str] | None = None) -> int:
         (Path(__file__).parent / "prompts").glob("*.py")
     )
     sources += list((Path(__file__).parent / "guides").glob("*.md"))
+    if plugin is not None:
+        sources.extend(Path(path).resolve() for path in plugin.source_files())
     sources += [
         get_repo_root() / name
         for name in (
@@ -204,6 +209,7 @@ def main(argv: list[str] | None = None) -> int:
         "active_workers": {},
         "started_ns": time.time_ns(),
         "worker_capacity": len(gpus),
+        "perception_tools": plan["perception_tools"],
     }
     last_check = 0.0
 
@@ -220,6 +226,13 @@ def main(argv: list[str] | None = None) -> int:
             completed_attempts=len(episodes),
             official_successes=sum(row["official_success"] is True for row in episodes),
             valid_loops=sum(row["loop_verified"] for row in episodes),
+            perception_tool_calls={
+                name: sum(
+                    row.get("perception_tool_usage", {}).get("calls", {}).get(name, 0)
+                    for row in episodes
+                )
+                for name in plan["perception_tools"]
+            },
         )
         write_json(output / "summary.json", summary)
 

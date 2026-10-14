@@ -1,0 +1,370 @@
+{
+  "grounding_2d": {
+    "prompt_sha256": "e31d346a4eab1fe604d2002b207de034773cf6fe06fa4fd444da06931b7d5766",
+    "spec": {
+      "name": "grounding_2d",
+      "description": "Read-only 2D grounding using our fine-tuned VLM on an existing observation. Returns pixel xyxy boxes, image dimensions, step_idx, view and center_row_col. Use center_row_col with sample_world_xyz on exactly the same step/view for depth; a box alone is NOT a world pose, grasp, collision check, or success signal. VLM detections may be inaccurate. Does not execute actions or advance state.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "The object or referring expression to locate in the image."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "head",
+              "left_wrist",
+              "right_wrist"
+            ],
+            "default": "head"
+          },
+          "step": {
+            "type": "integer",
+            "minimum": -1,
+            "default": -1,
+            "description": "Recorded observation step; -1 selects the latest."
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "affordance_2d": {
+    "prompt_sha256": "597c3b725518c378efdd7104bb72596325016c939c5b166ed09c2ad964aa17d9",
+    "spec": {
+      "name": "affordance_2d",
+      "description": "Ask a complete manipulation question, e.g. Where should the mug be held to lift it? Returns interaction-region boxes, not an object detector or grasp pose. Read-only VLM estimate, not ground truth or executable actions. Does not advance state. 3D tools require saved camera calibration; never invent intrinsics.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Ask a complete manipulation question, e.g. Where should the mug be held to lift it? Returns interaction-region boxes, not an object detector or grasp pose."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "head",
+              "left_wrist",
+              "right_wrist"
+            ],
+            "default": "head"
+          },
+          "step": {
+            "type": "integer",
+            "minimum": -1,
+            "default": -1
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "pointing_2d": {
+    "prompt_sha256": "60329b3ea363082bdcc9723c8e9b1160415a66811ef70db2c763a4c4adce025e",
+    "spec": {
+      "name": "pointing_2d",
+      "description": "Ask a complete spatial localization question, e.g. What is the 2D location of the mug handle? Returns points; use point_row_col with sample_world_xyz at the same step/view. Read-only VLM estimate, not ground truth or executable actions. Does not advance state. 3D tools require saved camera calibration; never invent intrinsics.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Ask a complete spatial localization question, e.g. What is the 2D location of the mug handle? Returns points; use point_row_col with sample_world_xyz at the same step/view."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "head",
+              "left_wrist",
+              "right_wrist"
+            ],
+            "default": "head"
+          },
+          "step": {
+            "type": "integer",
+            "minimum": -1,
+            "default": -1
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "trace_2d": {
+    "prompt_sha256": "9934a2f915ed13fa2e2d798ee33c928c297267142734cf604b53053c049c8b63",
+    "spec": {
+      "name": "trace_2d",
+      "description": "Provide the manipulation task instruction. Predicts up to 10 projected robot end-effector key points, not object motion, joint commands, or a collision-checked path. Read-only VLM estimate, not ground truth or executable actions. Does not advance state. 3D tools require saved camera calibration; never invent intrinsics.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Provide the manipulation task instruction. Predicts up to 10 projected robot end-effector key points, not object motion, joint commands, or a collision-checked path."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "head",
+              "left_wrist",
+              "right_wrist"
+            ],
+            "default": "head"
+          },
+          "step": {
+            "type": "integer",
+            "minimum": -1,
+            "default": -1
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "trace_3d": {
+    "prompt_sha256": "99cd50a7945e67e445459b01755de5b921645d232e6bdd719889d145da3fb5c9",
+    "spec": {
+      "name": "trace_3d",
+      "description": "Provide an object manipulation instruction. Predicts the object's 3D trajectory in the selected camera frame in meters, NOT a robot end-effector trajectory or robot-world coordinates. Read-only VLM estimate, not ground truth or executable actions. Does not advance state. 3D tools require saved camera calibration; never invent intrinsics.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Provide an object manipulation instruction. Predicts the object's 3D trajectory in the selected camera frame in meters, NOT a robot end-effector trajectory or robot-world coordinates."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "head",
+              "left_wrist",
+              "right_wrist"
+            ],
+            "default": "head"
+          },
+          "step": {
+            "type": "integer",
+            "minimum": -1,
+            "default": -1
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "grounding_3d": {
+    "prompt_sha256": "da955d4fd4b311940a48bcdead283b0b2d182cbf4d2a415363a5fde8d9ba948d",
+    "spec": {
+      "name": "grounding_3d",
+      "description": "Provide the object category or referring expression. Returns oriented 3D box estimates in the selected camera frame: center/size in meters and Euler/pi plus radians, not robot-world poses. Read-only VLM estimate, not ground truth or executable actions. Does not advance state. 3D tools require saved camera calibration; never invent intrinsics.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Provide the object category or referring expression. Returns oriented 3D box estimates in the selected camera frame: center/size in meters and Euler/pi plus radians, not robot-world poses."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "head",
+              "left_wrist",
+              "right_wrist"
+            ],
+            "default": "head"
+          },
+          "step": {
+            "type": "integer",
+            "minimum": -1,
+            "default": -1
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "video_grounding_3d": {
+    "prompt_sha256": "18bc024c71a39d7235f44a09e8d5b1daff52398e1196769ebdcb95c80f2a41d1",
+    "spec": {
+      "name": "video_grounding_3d",
+      "description": "Provide an object category to locate across ordered recorded frames. Returns all predicted instances in the LAST frame's camera coordinates, not one result per frame. Requires identical image dimensions and intrinsics across the selected view/steps. Read-only VLM estimate, not ground truth or executable actions. Does not advance state. 3D tools require saved camera calibration; never invent intrinsics.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "Provide an object category to locate across ordered recorded frames. Returns all predicted instances in the LAST frame's camera coordinates, not one result per frame. Requires identical image dimensions and intrinsics across the selected view/steps."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "head",
+              "left_wrist",
+              "right_wrist"
+            ],
+            "default": "head"
+          },
+          "steps": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Strictly increasing recorded steps, same camera/intrinsics. Last step is the 3D reference frame."
+          }
+        },
+        "required": [
+          "target",
+          "steps"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "depth_estimation": {
+    "prompt_sha256": "1447f5ef7be58098df70343057ba4614c0a104acf8d78547f42b628e92dddfd4",
+    "spec": {
+      "name": "depth_estimation",
+      "description": "Read-only VLM estimate of one object's, visible marker's, or normalized image point's distance from the camera. Returns depths with depth_m in meters, reported units and query provenance. A marker must already exist in the source image; never invent or draw it. Uses saved camera intrinsics if present, otherwise no calibration is invented. Not a sensor depth map, axial Z, world position, object size, pairwise distance, action or success signal. Cannot replace sample_world_xyz or measured depth for back-projection; does not advance state.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512,
+                "description": "Object referring expression, e.g. the red cup; shorthand for kind=object."
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "object",
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  }
+                },
+                "required": [
+                  "kind",
+                  "name"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "marker",
+                    "type": "string"
+                  },
+                  "marker": {
+                    "type": "string",
+                    "enum": [
+                      "A",
+                      "B",
+                      "C",
+                      "D",
+                      "red_dot",
+                      "red_arrow"
+                    ]
+                  }
+                },
+                "required": [
+                  "kind",
+                  "marker"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "point",
+                    "type": "string"
+                  },
+                  "point_xy_1000": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1000
+                    }
+                  }
+                },
+                "required": [
+                  "kind",
+                  "point_xy_1000"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "head",
+              "left_wrist",
+              "right_wrist"
+            ],
+            "default": "head"
+          },
+          "step": {
+            "type": "integer",
+            "minimum": -1,
+            "default": -1
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}
