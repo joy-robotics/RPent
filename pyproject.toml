@@ -281,6 +281,7 @@ convention = "google"
 "robots/robotwin/tool_plugin.py" = ["CPY001"]
 "tests/unit_tests/robots/robotwin/embodied/**/*.py" = ["CPY001"]
 "tests/unit_tests/robots/robotwin/test_tool_plugin.py" = ["CPY001"]
+"tests/e2e_tests/robotwin/embodied_planner_smoke.py" = ["CPY001"]
 
 [tool.ruff.format]
 quote-style = "double"

@@ -214,6 +214,8 @@ rpent --robot libero --dashboard --dashboard-language zh-cn \
 
 八种只读 VLM 工具可与原生 Joy-Brain 或 LingBot toolkit 共存；定义、推理服务与测评接入均在本仓库维护。
 使用方式见 [Embodied Tools 指南](robots/robotwin/embodied/README.zh-CN.md)。
+
+合并进度、验证边界及 5090 接续步骤见 [Embodied Tool 交接文档](HANDOFF_EMBODIED_TOOLS.md)。
 默认关闭，不替换 VLA 或原子动作。
 
 ## 参与贡献

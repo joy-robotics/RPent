@@ -1,0 +1,454 @@
+{
+  "kind": "explicit_registered_tool_real_planner_diagnostic",
+  "date": "2026-10-14",
+  "autonomous_benchmark": false,
+  "explicitly_required_tool": "grounding_2d",
+  "real_planner": true,
+  "real_vlm": true,
+  "real_vla": true,
+  "real_simulator": true,
+  "task": "click_bell",
+  "seed": 100000,
+  "gpu_layout": {
+    "vla_and_environment": 0,
+    "vlm": 1,
+    "workers": 1
+  },
+  "max_turns": 16,
+  "max_episode_steps": 256,
+  "official_success": true,
+  "loop_verified": true,
+  "executed_actions": 117,
+  "action_tool_calls": {
+    "lingbot_act": 2,
+    "move_to": 1
+  },
+  "all_planner_tool_calls": {
+    "read_text_file": 4,
+    "view_env_state": 1,
+    "grounding_2d": 1,
+    "sample_world_xyz": 2,
+    "lingbot_act": 2,
+    "pointing_2d": 1,
+    "move_to": 1,
+    "finish": 1
+  },
+  "perception_tool_usage": {
+    "calls": {
+      "grounding_2d": 1,
+      "affordance_2d": 0,
+      "pointing_2d": 1,
+      "trace_2d": 0,
+      "trace_3d": 0,
+      "grounding_3d": 0,
+      "video_grounding_3d": 0,
+      "depth_estimation": 0
+    },
+    "successes": {
+      "grounding_2d": 1,
+      "affordance_2d": 0,
+      "pointing_2d": 1,
+      "trace_2d": 0,
+      "trace_3d": 0,
+      "grounding_3d": 0,
+      "video_grounding_3d": 0,
+      "depth_estimation": 0
+    },
+    "failures": {
+      "grounding_2d": 0,
+      "affordance_2d": 0,
+      "pointing_2d": 0,
+      "trace_2d": 0,
+      "trace_3d": 0,
+      "grounding_3d": 0,
+      "video_grounding_3d": 0,
+      "depth_estimation": 0
+    },
+    "incomplete": 0,
+    "elapsed_s": 12.064605672843754
+  },
+  "agent_loop_elapsed_s": 392.5212969779968,
+  "supervisor_wall_s": 490.7046676184982,
+  "diagnostic_guidance": "\nINTERFACE DIAGNOSTIC (not an autonomous benchmark): before executing any robot\naction, call grounding_2d on the task's target object using the latest saved head\nobservation. After a successful nonempty detection, pass its center_row_col to\nsample_world_xyz with exactly the same view and step_idx. Read that result before\nchoosing an action. Then pursue the unchanged native task with lingbot_act and/or\nthe original atomic actions, within the existing budgets. If perception fails,\nreport the actual error instead of inventing coordinates. Do not infer task\nsuccess from this diagnostic: only the native environment can confirm success.\n",
+  "entrypoint_sha256": "e66eec2360cc561c9fc084e5f5a8434c766b843eab0c47df827f720ef8f31f26",
+  "planner_stats": {
+    "total_input_tokens": 194466,
+    "total_output_tokens": 680,
+    "total_cached_input_tokens": 172065,
+    "turns_used": 13,
+    "tool_calls": 13
+  },
+  "tool_receipts": [
+    {
+      "tool": "grounding_2d",
+      "tool_call_id": "call_pfYS6oEIJNKFnBunTpxvP9iI",
+      "message_index": 12,
+      "tool_result": {
+        "found": true,
+        "detections": [
+          {
+            "label": "rounded bell with flat black base",
+            "bbox_xyxy_1000": [
+              220,
+              458,
+              365,
+              633
+            ],
+            "bbox_xyxy_px": [
+              70.4,
+              109.92,
+              116.8,
+              151.92
+            ],
+            "center_row_col": [
+              130,
+              93
+            ]
+          }
+        ],
+        "image_size": {
+          "width": 320,
+          "height": 240
+        },
+        "bbox_format": "xyxy",
+        "coordinate_space": "image_pixels",
+        "model_output_format": "finecop_posti_bbox_2d",
+        "bbox_bounds": "continuous edges: x in [0,width], y in [0,height]",
+        "request_id": "ddff54b6e37a4c7e99098cd0f877697d",
+        "task": "grounding_2d",
+        "target": "rounded bell with flat black base",
+        "checkpoint": "/mnt/workspace1/share/ckpt/qwen35_9b_midv5_sftv7_joybrain_rl_082120_sftv7_1M_v3_nothinking_n8_globalbatch1280_minibatch640_40gpu",
+        "prompt_sha256": "e31d346a4eab1fe604d2002b207de034773cf6fe06fa4fd444da06931b7d5766",
+        "input_prompt_sha256": "e0201b829e084de7f6d1aa526bc992ce917944d64ee64dff17e52d635c0d1bce",
+        "frame_count": 1,
+        "inference_seconds": 11.114842331968248,
+        "success": true,
+        "step_idx": 0,
+        "view": "head",
+        "step_indices": [
+          0
+        ],
+        "source_image_sha256": "66faf34a778b4d83a6bf8e8f1ccd752043b29c38f8b5d1d57af2fbbeca5d0fed",
+        "source_image_sha256s": [
+          "66faf34a778b4d83a6bf8e8f1ccd752043b29c38f8b5d1d57af2fbbeca5d0fed"
+        ],
+        "action_executed": false,
+        "warning": "Perception estimate, not ground truth, an executable action, a collision check, or official task success.",
+        "overlay_kind": "2D geometry in source image pixels"
+      },
+      "model_raw_text": "[{\"bbox_2d\": [(220, 458, 365, 633)], \"label\": \"rounded bell with flat black base\"}]",
+      "planner_tool_result_exact_match": true,
+      "subsequent_same_frame_world_lookup": {
+        "arguments": {
+          "pixels": [
+            [
+              130,
+              93
+            ]
+          ],
+          "view": "head",
+          "step": 0
+        },
+        "result": {
+          "success": true,
+          "step_idx": 0,
+          "view": "head",
+          "coordinate_space": "head",
+          "image_shape": [
+            240,
+            320
+          ],
+          "pixel_order": "row_col",
+          "coordinate_order": "xyz",
+          "frame": "world",
+          "unit": "metre",
+          "neighborhood": 1,
+          "samples": [
+            {
+              "pixel": [
+                130,
+                93
+              ],
+              "valid": true,
+              "xyz": [
+                -0.16119877994060516,
+                -0.05047621950507164,
+                0.7851627469062805
+              ],
+              "valid_points": 9,
+              "valid_coordinates": [
+                9,
+                9,
+                9
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tool": "pointing_2d",
+      "tool_call_id": "call_CXxNTHepo357mZwrE58ZsJbI",
+      "message_index": 20,
+      "tool_result": {
+        "image_size": {
+          "width": 320,
+          "height": 240
+        },
+        "found": true,
+        "points": [
+          {
+            "label": "top push button",
+            "point_2d": [
+              [
+                295,
+                520
+              ]
+            ],
+            "point_xy_1000": [
+              295,
+              520
+            ],
+            "point_xy_px": [
+              94.4,
+              124.8
+            ],
+            "point_row_col": [
+              124,
+              94
+            ]
+          }
+        ],
+        "coordinate_space": "image_pixels",
+        "model_output_format": "point_2d",
+        "pixel_address_rule": "floor continuous edge coordinates; the 1000 edge maps to the last valid pixel",
+        "request_id": "f335434f88404282a3fd94f350889247",
+        "task": "pointing_2d",
+        "target": "Where is the top push button at the center of the rounded bell?",
+        "checkpoint": "/mnt/workspace1/share/ckpt/qwen35_9b_midv5_sftv7_joybrain_rl_082120_sftv7_1M_v3_nothinking_n8_globalbatch1280_minibatch640_40gpu",
+        "prompt_sha256": "60329b3ea363082bdcc9723c8e9b1160415a66811ef70db2c763a4c4adce025e",
+        "input_prompt_sha256": "28b9aaa2ba86fedd2d9338c6f59959b77a3a57bf0f04728e3f0c6efb78522618",
+        "frame_count": 1,
+        "inference_seconds": 0.888447773642838,
+        "success": true,
+        "step_idx": 2,
+        "view": "head",
+        "step_indices": [
+          2
+        ],
+        "source_image_sha256": "bd386fd27fd36c09ae69d33432af9abe118d09a573359ad35732b47313709e81",
+        "source_image_sha256s": [
+          "bd386fd27fd36c09ae69d33432af9abe118d09a573359ad35732b47313709e81"
+        ],
+        "action_executed": false,
+        "warning": "Perception estimate, not ground truth, an executable action, a collision check, or official task success.",
+        "overlay_kind": "2D geometry in source image pixels"
+      },
+      "model_raw_text": "[{\"point_2d\": [(295, 520)], \"label\": \"top push button\"}]",
+      "planner_tool_result_exact_match": true,
+      "subsequent_same_frame_world_lookup": {
+        "arguments": {
+          "view": "head",
+          "step": 2,
+          "pixels": [
+            [
+              124,
+              94
+            ],
+            [
+              117,
+              94
+            ],
+            [
+              119,
+              94
+            ]
+          ],
+          "neighborhood": 0
+        },
+        "result": {
+          "success": true,
+          "step_idx": 2,
+          "view": "head",
+          "coordinate_space": "head",
+          "image_shape": [
+            240,
+            320
+          ],
+          "pixel_order": "row_col",
+          "coordinate_order": "xyz",
+          "frame": "world",
+          "unit": "metre",
+          "neighborhood": 0,
+          "samples": [
+            {
+              "pixel": [
+                124,
+                94
+              ],
+              "valid": true,
+              "xyz": [
+                -0.1603715568780899,
+                -0.03768349066376686,
+                0.7872779965400696
+              ],
+              "valid_points": 1,
+              "valid_coordinates": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "pixel": [
+                117,
+                94
+              ],
+              "valid": true,
+              "xyz": [
+                -0.16020524501800537,
+                -0.027339642867445946,
+                0.7961655259132385
+              ],
+              "valid_points": 1,
+              "valid_coordinates": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "pixel": [
+                119,
+                94
+              ],
+              "valid": true,
+              "xyz": [
+                -0.16074055433273315,
+                -0.028695864602923393,
+                0.7915123105049133
+              ],
+              "valid_points": 1,
+              "valid_coordinates": [
+                1,
+                1,
+                1
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "relevant_tool_sequence": [
+    {
+      "message_index": 11,
+      "name": "grounding_2d",
+      "id": "call_pfYS6oEIJNKFnBunTpxvP9iI",
+      "arguments": {
+        "target": "rounded bell with flat black base",
+        "view": "head",
+        "step": -1
+      }
+    },
+    {
+      "message_index": 13,
+      "name": "sample_world_xyz",
+      "id": "call_mAhLEbUscNYe2jTQJGosMzkg",
+      "arguments": {
+        "pixels": [
+          [
+            130,
+            93
+          ]
+        ],
+        "view": "head",
+        "step": 0
+      }
+    },
+    {
+      "message_index": 15,
+      "name": "lingbot_act",
+      "id": "call_3tsCTyJPP8D5fbJa1NvESiFd",
+      "arguments": {
+        "chunks": 1,
+        "use_length": 50,
+        "prompt": "Press the specified top area of the rounded bell with flat black part."
+      }
+    },
+    {
+      "message_index": 17,
+      "name": "lingbot_act",
+      "id": "call_VQc1WRd3LeDaonoBPT9LesVh",
+      "arguments": {
+        "chunks": 1,
+        "use_length": 50,
+        "prompt": "Press the specified top area of the rounded bell with flat black part."
+      }
+    },
+    {
+      "message_index": 19,
+      "name": "pointing_2d",
+      "id": "call_CXxNTHepo357mZwrE58ZsJbI",
+      "arguments": {
+        "target": "Where is the top push button at the center of the rounded bell?",
+        "view": "head",
+        "step": 2
+      }
+    },
+    {
+      "message_index": 21,
+      "name": "sample_world_xyz",
+      "id": "call_GfqtWLEVbo8WwWXCnGbQ1hYz",
+      "arguments": {
+        "view": "head",
+        "step": 2,
+        "pixels": [
+          [
+            124,
+            94
+          ],
+          [
+            117,
+            94
+          ],
+          [
+            119,
+            94
+          ]
+        ],
+        "neighborhood": 0
+      }
+    },
+    {
+      "message_index": 23,
+      "name": "move_to",
+      "id": "call_2wnqh2paqx0KEZ30Rgd0M4kV",
+      "arguments": {
+        "arm": "left",
+        "xyz": [
+          -0.158,
+          -0.026,
+          0.94
+        ],
+        "quat": [
+          0.44375136,
+          -0.54251206,
+          0.46040383,
+          0.54478776
+        ],
+        "gripper": 0,
+        "substeps": 25
+      }
+    },
+    {
+      "message_index": 25,
+      "name": "finish",
+      "id": "call_3harvKupkEwd7ckO8P5DWkFK",
+      "arguments": {
+        "status": "success",
+        "summary": "Native eval_success=true after left-arm bell approach/correction. Diagnostic localized the bell and sampled same-frame world coordinates before motion. Executed two 50-action VLA chunks and one measured move_to; stopped immediately at native success, 117/256 actions."
+      }
+    }
+  ]
+}

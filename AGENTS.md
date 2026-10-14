@@ -45,6 +45,10 @@ disagreements with documentation instead of assuming either is correct.
 
 ## Task skills
 
+For RoboTwin embodied-tool development or GPU-cluster continuation, first read
+[HANDOFF_EMBODIED_TOOLS.md](HANDOFF_EMBODIED_TOOLS.md) for the migration state,
+validated boundaries, environment prerequisites, and staged verification steps.
+
 Read the relevant skill when the task calls for it; ordinary edits do not
 require loading every skill.
 

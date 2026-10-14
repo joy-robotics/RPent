@@ -214,6 +214,9 @@ see [the Joy-Brain integration guide](robots/robotwin/JOYBRAIN.md).
 Eight read-only VLM tools can be enabled alongside the native Joy-Brain or
 LingBot toolkit. Definitions, inference service and evaluation integration live
 in this repository; see [the embodied tools guide](robots/robotwin/embodied/README.md).
+
+For migration status and GPU-cluster continuation, read the
+[embodied-tool handoff](HANDOFF_EMBODIED_TOOLS.md) (Chinese).
 They are disabled by default and do not replace VLA or atomic actions.
 
 ## Contributing

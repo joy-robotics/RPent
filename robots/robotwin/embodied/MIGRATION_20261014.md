@@ -1,5 +1,7 @@
 # RPent 原生工具迁移与上游核验（2026-10-14）
 
+本文记录首次迁移时的证据；后续两卡闭环验证、远程发布和 5090 接续进度见 [当前交接文档](../../../HANDOFF_EMBODIED_TOOLS.md)。
+
 ## “同名重建”的含义
 
 同事的原话描述的是 GitHub 上的仓库被重新创建，不能据此推断 Git 提交历史被清空、代码从零重写，或本地旧 checkout 已经自动更新。是否兼容应以实际远程引用、共同祖先和实现为准。仅凭代码也不能独立证明 GitHub 上曾发生删除操作。
@@ -69,6 +71,6 @@ VLM 服务仍是 Transformers/PyTorch + WebSocket，不是 vLLM。此次保留 a
 
 详细日志及大文件保留在 `/mnt/workspace/users/linxiao/code/RPent_migration_20261013/`，包括 `remote_full_unit_tests.log`、`remote_clean_unit_tests_host.log`、`final_path_unit_tests.log`、`native_vlm_remote_20261014/` 和 `native_joybrain_remote_20261014/`。目录名为 13 日是因为迁移从当日开始，真实验证日期见产物中的 14 日时间戳。
 
-原 `code/RPent` 整体保留为迁移目录内的 `original_RPent/`，其未提交修改、`.git` 历史及实验文件不丢弃；`code/RPent-JoyBrain` 和 yaoxu 路径不修改。后续开发入口是新的 `code/RPent` 的 `embodied-tool` 分支；本次不 push。
+原 `code/RPent` 整体保留为迁移目录内的 `original_RPent/`，其未提交修改、`.git` 历史及实验文件不丢弃；`code/RPent-JoyBrain` 和 yaoxu 路径不修改。开发入口是新的 `code/RPent` 的 `embodied-tool` 分支；首次迁移仅做本地提交，后续发布情况以当前交接文档为准。
 
 服务启动、原生测评和探针的参数示例见 [工具说明](README.zh-CN.md)。真实 planner/50 任务对照实验及八卡 5090 硬件运行不属于这次已完成的接口验证，不能从上述烟测结果推导。

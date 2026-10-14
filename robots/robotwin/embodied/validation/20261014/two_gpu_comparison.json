@@ -1,0 +1,270 @@
+{
+  "kind": "bounded_two_gpu_autonomous_comparison",
+  "source_commit": "ed50da13fd77205e53b08744ea66f0741c2a59fe",
+  "date": "2026-10-14",
+  "real_planner": true,
+  "real_simulator": true,
+  "real_vla": true,
+  "full_benchmark": false,
+  "configuration": {
+    "gpu_layout": "colocated",
+    "gpus": [
+      0,
+      1
+    ],
+    "workers_per_gpu": 1,
+    "total_workers": 2,
+    "strategy": "upstream",
+    "task_config": "demo_randomized",
+    "seed": 100000,
+    "max_turns": 12,
+    "max_tokens": 8192,
+    "max_episode_steps": 512,
+    "planner_timeout_s": 600,
+    "worker_startup_timeout_s": 600,
+    "joybrain_timeout_s": 180,
+    "memory_profile": "local",
+    "memory_access": "read_only",
+    "memory_isolated_per_episode": true
+  },
+  "phases": {
+    "baseline": {
+      "status": "complete",
+      "evaluator_wall_s": 499.9113795403391,
+      "real_vlm_service": false,
+      "vlm_gpu": null,
+      "registered_perception_tools": [],
+      "episodes": [
+        {
+          "task": "click_bell",
+          "seed": 100000,
+          "official_success": true,
+          "loop_verified": true,
+          "stop_reason": "native_success",
+          "error": null,
+          "trace_error": null,
+          "executed_actions": 117,
+          "vla_calls": 2,
+          "atomic_calls": 1,
+          "action_tool_calls": {
+            "lingbot_act": 2,
+            "move_to": 1
+          },
+          "all_planner_tool_calls": {
+            "read_text_file": 4,
+            "view_env_state": 1,
+            "lingbot_act": 2,
+            "sample_world_xyz": 1,
+            "move_to": 1,
+            "finish": 1
+          },
+          "perception_tool_usage": {
+            "calls": {},
+            "successes": {},
+            "failures": {},
+            "incomplete": 0,
+            "elapsed_s": 0.0
+          },
+          "agent_loop_elapsed_s": 354.4602222442627,
+          "worker_wall_s": 421.91584086883813,
+          "slot": "gpu0_worker0",
+          "planner_stats": {
+            "total_input_tokens": 99582,
+            "total_output_tokens": 858,
+            "total_cached_input_tokens": 82358,
+            "turns_used": 10,
+            "tool_calls": 10
+          }
+        },
+        {
+          "task": "place_container_plate",
+          "seed": 100000,
+          "official_success": true,
+          "loop_verified": true,
+          "stop_reason": "native_success",
+          "error": null,
+          "trace_error": null,
+          "executed_actions": 115,
+          "vla_calls": 3,
+          "atomic_calls": 0,
+          "action_tool_calls": {
+            "lingbot_act": 3
+          },
+          "all_planner_tool_calls": {
+            "read_text_file": 4,
+            "view_env_state": 1,
+            "lingbot_act": 3,
+            "finish": 1
+          },
+          "perception_tool_usage": {
+            "calls": {},
+            "successes": {},
+            "failures": {},
+            "incomplete": 0,
+            "elapsed_s": 0.0
+          },
+          "agent_loop_elapsed_s": 373.6084551811218,
+          "worker_wall_s": 441.6303144749254,
+          "slot": "gpu1_worker0",
+          "planner_stats": {
+            "total_input_tokens": 84137,
+            "total_output_tokens": 596,
+            "total_cached_input_tokens": 67847,
+            "turns_used": 9,
+            "tool_calls": 9
+          }
+        }
+      ]
+    },
+    "embodied": {
+      "status": "complete",
+      "evaluator_wall_s": 402.9786358959973,
+      "real_vlm_service": true,
+      "vlm_gpu": 1,
+      "registered_perception_tools": [
+        "grounding_2d",
+        "affordance_2d",
+        "pointing_2d",
+        "trace_2d",
+        "trace_3d",
+        "grounding_3d",
+        "video_grounding_3d",
+        "depth_estimation"
+      ],
+      "episodes": [
+        {
+          "task": "click_bell",
+          "seed": 100000,
+          "official_success": true,
+          "loop_verified": true,
+          "stop_reason": "native_success",
+          "error": null,
+          "trace_error": null,
+          "executed_actions": 57,
+          "vla_calls": 2,
+          "atomic_calls": 0,
+          "action_tool_calls": {
+            "lingbot_act": 2
+          },
+          "all_planner_tool_calls": {
+            "read_text_file": 4,
+            "view_env_state": 1,
+            "lingbot_act": 2,
+            "finish": 1
+          },
+          "perception_tool_usage": {
+            "calls": {
+              "grounding_2d": 0,
+              "affordance_2d": 0,
+              "pointing_2d": 0,
+              "trace_2d": 0,
+              "trace_3d": 0,
+              "grounding_3d": 0,
+              "video_grounding_3d": 0,
+              "depth_estimation": 0
+            },
+            "successes": {
+              "grounding_2d": 0,
+              "affordance_2d": 0,
+              "pointing_2d": 0,
+              "trace_2d": 0,
+              "trace_3d": 0,
+              "grounding_3d": 0,
+              "video_grounding_3d": 0,
+              "depth_estimation": 0
+            },
+            "failures": {
+              "grounding_2d": 0,
+              "affordance_2d": 0,
+              "pointing_2d": 0,
+              "trace_2d": 0,
+              "trace_3d": 0,
+              "grounding_3d": 0,
+              "video_grounding_3d": 0,
+              "depth_estimation": 0
+            },
+            "incomplete": 0,
+            "elapsed_s": 0.0
+          },
+          "agent_loop_elapsed_s": 156.43623995780945,
+          "worker_wall_s": 215.9556559091434,
+          "slot": "gpu0_worker0",
+          "planner_stats": {
+            "total_input_tokens": 103975,
+            "total_output_tokens": 415,
+            "total_cached_input_tokens": 85743,
+            "turns_used": 8,
+            "tool_calls": 8
+          }
+        },
+        {
+          "task": "place_container_plate",
+          "seed": 100000,
+          "official_success": true,
+          "loop_verified": true,
+          "stop_reason": "native_success",
+          "error": null,
+          "trace_error": null,
+          "executed_actions": 128,
+          "vla_calls": 3,
+          "atomic_calls": 0,
+          "action_tool_calls": {
+            "lingbot_act": 3
+          },
+          "all_planner_tool_calls": {
+            "read_text_file": 4,
+            "view_env_state": 1,
+            "lingbot_act": 3,
+            "finish": 1
+          },
+          "perception_tool_usage": {
+            "calls": {
+              "grounding_2d": 0,
+              "affordance_2d": 0,
+              "pointing_2d": 0,
+              "trace_2d": 0,
+              "trace_3d": 0,
+              "grounding_3d": 0,
+              "video_grounding_3d": 0,
+              "depth_estimation": 0
+            },
+            "successes": {
+              "grounding_2d": 0,
+              "affordance_2d": 0,
+              "pointing_2d": 0,
+              "trace_2d": 0,
+              "trace_3d": 0,
+              "grounding_3d": 0,
+              "video_grounding_3d": 0,
+              "depth_estimation": 0
+            },
+            "failures": {
+              "grounding_2d": 0,
+              "affordance_2d": 0,
+              "pointing_2d": 0,
+              "trace_2d": 0,
+              "trace_3d": 0,
+              "grounding_3d": 0,
+              "video_grounding_3d": 0,
+              "depth_estimation": 0
+            },
+            "incomplete": 0,
+            "elapsed_s": 0.0
+          },
+          "agent_loop_elapsed_s": 289.2738997936249,
+          "worker_wall_s": 349.47090115305036,
+          "slot": "gpu1_worker0",
+          "planner_stats": {
+            "total_input_tokens": 124981,
+            "total_output_tokens": 568,
+            "total_cached_input_tokens": 104188,
+            "turns_used": 9,
+            "tool_calls": 9
+          }
+        }
+      ]
+    }
+  },
+  "autonomous_perception_calls": 0,
+  "interpretation": "Both configurations completed both native tasks. Autonomous planner did not select perception tools; tool invocation and receipt require the separately disclosed explicit diagnostic. This is not a full benchmark or a throughput comparison."
+}
